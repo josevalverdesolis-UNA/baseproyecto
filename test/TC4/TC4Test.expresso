@@ -1,0 +1,27 @@
+// TC4 - Pattern Matching con data y ^
+print("=== TC4: Pattern Matching ===")
+
+data list = {
+    Nil,
+    Cons(car:any, cdr:list)
+}
+
+fun length(xs:list):int = match xs with
+    Nil -> 0
+  | Cons(_, rest) -> 1 + length(rest)
+
+fun sum(xs:list):int = match xs with
+    Nil -> 0
+  | Cons(x, rest) -> x + sum(rest)
+
+let l3 = ^Cons(3, ^Cons(2, ^Cons(1, ^Nil())))
+print("List length = " + length(l3))
+print("List sum = " + sum(l3))
+
+// Match con valores específicos y comodín
+fun describe(xs:list):string = match xs with
+    Nil -> "Empty list"
+  | Cons(0, _) -> "Starts with zero"
+  | Cons(_, _) -> "Non-empty list"
+
+print(describe(l3))
