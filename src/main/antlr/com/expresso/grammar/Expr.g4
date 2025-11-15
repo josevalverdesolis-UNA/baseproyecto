@@ -36,29 +36,29 @@ elements: expr (COMMA expr)*;
 
 // Expresion with precedens and unary '-'
 expr:
-	'-' expr													# UnaryMinus
-	| '!' expr													# LogicalNot
-	| '^' constructor_call										# Instantiator
-	| MATCH expr WITH NEWLINE* match_rule (NEWLINE* PIPE NEWLINE* match_rule)*		# Match
-	| expr '(' (expr (',' expr)*)? ')'							# FuncCall
-	| <assoc = right> expr op = ('**' | '!**') expr				# PowSqrt
-	| expr op = ('*' | '/') expr								# MulDiv
-	| expr op = ('+' | '-') expr								# AddSub
-	| expr op = ('<' | '<=' | '>' | '>=' | '==' | '!=') expr	# Relational
-	| expr op = '&&' expr										# LogicalAnd
-	| expr op = '||' expr										# LogicalOr
-	| <assoc = right> expr QUESTION expr COLON expr				# Ternary
-	| <assoc = right> '(' arguments? ')' ARROW expr				# LambdaParams
-	| <assoc = right> ID (COLON type)? ARROW expr		# Lambda
-	| expr COLON type											# Cast
-	| INT							# Num
-	| FLOAT							# Num
-	| BOOLEAN						# Bool
-	| STRING						# String
-	| NONE							# None
-	| ID							# Variable
-	| '(' expr ')'					# Parens
-	| LBRACK elements? RBRACK		# Lists;
+        <assoc = right> '(' arguments? ')' ARROW expr                         # LambdaParams
+        | <assoc = right> ID (COLON type)? ARROW expr           # Lambda
+        | expr COLON type                                                                                       # Cast
+        | '-' expr                                                                                                        # UnaryMinus
+        | '!' expr                                                                                                      # LogicalNot
+        | '^' constructor_call                                                                          # Instantiator
+        | MATCH expr WITH NEWLINE* match_rule (NEWLINE* PIPE NEWLINE* match_rule)*              # Match
+        | expr '(' (expr (',' expr)*)? ')'                                                      # FuncCall
+        | <assoc = right> expr op = ('**' | '!**') expr                         # PowSqrt
+        | expr op = ('*' | '/') expr                                                            # MulDiv
+        | expr op = ('+' | '-') expr                                                            # AddSub
+        | expr op = ('<' | '<=' | '>' | '>=' | '==' | '!=') expr        # Relational
+        | expr op = '&&' expr                                                                           # LogicalAnd
+        | expr op = '||' expr                                                                           # LogicalOr
+        | <assoc = right> expr QUESTION expr COLON expr                         # Ternary
+        | INT                                                   # Num
+        | FLOAT                                                 # Num
+        | BOOLEAN                                               # Bool
+        | STRING                                                # String
+        | NONE                                                  # None
+        | ID                                                    # Variable
+        | '(' expr ')'                                  # Parens
+        | LBRACK elements? RBRACK               # Lists;
 
 // ---------------------- Matching Rules ----------------------
 match_rule: pattern guard? ARROW expr;
