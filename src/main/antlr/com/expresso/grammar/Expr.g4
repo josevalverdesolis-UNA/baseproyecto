@@ -97,7 +97,7 @@ type:
 	| atomic				# AtomType
 	| tuple ARROW type			# TupleArrowType //ArrowType because can have arrow
 	| tuple				# TupleType
-	| '(' type ')' ARROW type	# ParenArrowType; //ArrowType because can have arrow
+	| '(' type ')' ARROW type	# ParenArrowType //ArrowType because can have arrow
 	| '(' type ')'			# ParenType;
 
 //-----------------------------------------------------------------------------------------------------------
