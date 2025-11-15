@@ -28,8 +28,8 @@ constructors: constructor (COMMA NEWLINE* constructor)*;
 constructor: ID ('(' arguments ')')?;
 
 // Arguments
-arguments: argument (COMMA argument)*;
-argument: (ID COLON)? type;
+arguments: param (COMMA param)*;
+param: ID (COLON type)?;
 
 // Elements of a Lists
 elements: expr (COMMA expr)*;
@@ -40,7 +40,6 @@ expr:
 	| '!' expr													# LogicalNot
 	| '^' constructor_call										# Instantiator
 	| MATCH expr WITH NEWLINE* match_rule (NEWLINE* PIPE NEWLINE* match_rule)*		# Match
-	| expr COLON type											# Cast
 	| expr '(' (expr (',' expr)*)? ')'							# FuncCall
 	| <assoc = right> expr op = ('**' | '!**') expr				# PowSqrt
 	| expr op = ('*' | '/') expr								# MulDiv
@@ -51,7 +50,8 @@ expr:
 	| <assoc = right> expr QUESTION expr COLON expr				# Ternary
 	| <assoc = right> '(' arguments? ')' ARROW expr				# LambdaParams
 	//	| '(' arguments? ')' ARROW expr	# LambdaParams
-	| <assoc = right> ID ARROW expr	# Lambda
+	| <assoc = right> ID (COLON type)? ARROW expr	# Lambda
+	| expr COLON type											# Cast
 	| INT							# Num
 	| FLOAT							# Num
 	| BOOLEAN						# Bool
@@ -93,9 +93,12 @@ atomic:
 tuple: '(' atomic (COMMA atomic)* ')';
 
 type:
-	atomic (ARROW type)?			# AtomArrowType //ArrowType because can have arrow
-	| tuple (ARROW type)?			# TupleArrowType //ArrowType because can have arrow
-	| '(' type ')' (ARROW type)?	# ParenArrowType; //ArrowType because can have arrow
+	atomic ARROW type			# AtomArrowType //ArrowType because can have arrow
+	| atomic				# AtomType
+	| tuple ARROW type			# TupleArrowType //ArrowType because can have arrow
+	| tuple				# TupleType
+	| '(' type ')' ARROW type	# ParenArrowType; //ArrowType because can have arrow
+	| '(' type ')'			# ParenType;
 
 //-----------------------------------------------------------------------------------------------------------
 // Lexer LEXER In ANTLR the lexer rules are defined with capital letters A lexer rule means how to
