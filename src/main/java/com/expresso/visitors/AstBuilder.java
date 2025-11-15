@@ -10,7 +10,6 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import com.expresso.ast.Argument;
-import com.expresso.ast.AtomicNode;
 import com.expresso.ast.BinaryOp;
 import com.expresso.ast.BooleanNode;
 import com.expresso.ast.CastNode;
@@ -231,6 +230,10 @@ public class AstBuilder extends ExprBaseVisitor<Node> {
     @Override
     public Lambda visitLambda(ExprParser.LambdaContext ctx) {
         String paramName = ctx.ID().getText();
+        if (ctx.type() != null) {
+            // Typed single-parameter lambdas are parsed, but the explicit type annotation
+            // is currently ignored by the AST layer (typing happens later in the pipeline).
+        }
         Node body = visit(ctx.expr());
 
         return new Lambda(List.of(paramName), body);
@@ -275,7 +278,7 @@ public class AstBuilder extends ExprBaseVisitor<Node> {
         String functionName = ctx.ID().getText();
         List<Argument> params = Collections.emptyList();
         if (ctx.arguments() != null) {
-            params = ctx.arguments().argument().stream().map(this::buildArgument).collect(Collectors.toList());
+            params = ctx.arguments().param().stream().map(this::buildArgument).collect(Collectors.toList());
         }
         TypeNode returnType = typeBuilder.visit(ctx.type());
         Node body = visit(ctx.expr());
@@ -324,26 +327,15 @@ public class AstBuilder extends ExprBaseVisitor<Node> {
             return Collections.emptyList();
         }
 
-        return ctx.argument().stream()
+        return ctx.param().stream()
                 .map(this::extractParameterName)
                 .filter(name -> name != null)
                 .collect(Collectors.toList());
     }
 
-    // Extract single parameter name from ArgumentContext
-    private String extractParameterName(ExprParser.ArgumentContext argCtx) {
-        // Explicit annotation: x: Int
-        if (argCtx.ID() != null) {
-            return argCtx.ID().getText();
-        }
-
-        // Implicit: just "x" (parsed as atomic type)
-        TypeNode typeNode = typeBuilder.visit(argCtx.type());
-        if (typeNode instanceof AtomicNode atomic) {
-            return atomic.name();
-        }
-
-        return null;
+    // Extract single parameter name from ParamContext
+    private String extractParameterName(ExprParser.ParamContext argCtx) {
+        return argCtx.ID() != null ? argCtx.ID().getText() : null;
     }
 
     // -----------------------------------------------------------------------------------
@@ -358,7 +350,7 @@ public class AstBuilder extends ExprBaseVisitor<Node> {
         List<Argument> arguments = Collections.emptyList();
 
         if (ctx.arguments() != null) {
-            arguments = ctx.arguments().argument().stream()
+            arguments = ctx.arguments().param().stream()
                     .map(this::buildArgument)
                     .collect(Collectors.toList());
         }
@@ -369,9 +361,9 @@ public class AstBuilder extends ExprBaseVisitor<Node> {
     /**
      * Builds an Argument node from ANTLR context
      */
-    private Argument buildArgument(ExprParser.ArgumentContext ctx) {
+    private Argument buildArgument(ExprParser.ParamContext ctx) {
         String name = ctx.ID() != null ? ctx.ID().getText() : null;
-        TypeNode type = typeBuilder.visit(ctx.type());
+        TypeNode type = ctx.type() != null ? typeBuilder.visit(ctx.type()) : null;
 
         return new Argument(name, type);
     }

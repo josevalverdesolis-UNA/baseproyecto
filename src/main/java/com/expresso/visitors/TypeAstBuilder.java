@@ -41,30 +41,36 @@ public class TypeAstBuilder extends ExprBaseVisitor<TypeNode> {
     @Override
     public TypeNode visitAtomArrowType(ExprParser.AtomArrowTypeContext ctx) {
         TypeNode left = visitAtomic(ctx.atomic());
-        if (ctx.ARROW() != null) {
-            TypeNode right = visit(ctx.type());
-            return new ArrowNode(left, right);
-        }
-        return left;
+        TypeNode right = visit(ctx.type());
+        return new ArrowNode(left, right);
+    }
+
+    @Override
+    public TypeNode visitAtomType(ExprParser.AtomTypeContext ctx) {
+        return visitAtomic(ctx.atomic());
     }
 
     @Override
     public TypeNode visitTupleArrowType(ExprParser.TupleArrowTypeContext ctx) {
         TypeNode left = visitTuple(ctx.tuple());
-        if (ctx.ARROW() != null) {
-            TypeNode right = visit(ctx.type());
-            return new ArrowNode(left, right);
-        }
-        return left;
+        TypeNode right = visit(ctx.type());
+        return new ArrowNode(left, right);
+    }
+
+    @Override
+    public TypeNode visitTupleType(ExprParser.TupleTypeContext ctx) {
+        return visitTuple(ctx.tuple());
     }
 
     @Override
     public TypeNode visitParenArrowType(ExprParser.ParenArrowTypeContext ctx) {
         TypeNode inner = visit(ctx.type(0));
-        if (ctx.ARROW() != null) {
-            TypeNode right = visit(ctx.type(1));
-            return new ArrowNode(inner, right);
-        }
-        return inner;
+        TypeNode right = visit(ctx.type(1));
+        return new ArrowNode(inner, right);
+    }
+
+    @Override
+    public TypeNode visitParenType(ExprParser.ParenTypeContext ctx) {
+        return visit(ctx.type());
     }
 }

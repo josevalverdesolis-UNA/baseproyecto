@@ -111,7 +111,10 @@ public class Utils {
             var tokens = new CommonTokenStream(lexer);
             var parser = new ExprParser(tokens);
             var tree = parser.prog();
-            
+            if (tree == null) {
+                throw new RuntimeException("Parse tree is null due to syntax errors.");
+            }
+
             Program ast = (Program) new AstBuilder().visit(tree);
             log(logger.apply("AST created with " + ast.size() + " statements"));
             
@@ -150,7 +153,10 @@ public class Utils {
             var tokens = new CommonTokenStream(lexer);
             var parser = new ExprParser(tokens);
             var tree = parser.prog();
-            
+            if (tree == null) {
+                throw new RuntimeException("Parse tree is null due to syntax errors.");
+            }
+
             Program ast = (Program) new AstBuilder().visit(tree);
             tokens.fill();
             log(logger.apply("AST created with " + ast.size() + " statements"));
