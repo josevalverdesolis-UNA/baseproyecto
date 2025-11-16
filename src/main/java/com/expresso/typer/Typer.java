@@ -162,14 +162,14 @@ public class Typer {
                     if (expr instanceof Lambda) {
                         env.define(name, declaredType);
                         TypeNode inferred = infer(expr, env);
-                        unify(inferred, declaredType);
+                        unifyAssignable(declaredType, inferred);
                         TypeNode finalType = apply(declaredType);
                         env.define(name, finalType);
                         yield finalType;
                     }
 
                     TypeNode inferred = infer(expr, env);
-                    unify(inferred, declaredType);
+                    unifyAssignable(declaredType, inferred);
                     TypeNode finalType = apply(declaredType);
                     env.define(name, finalType);
                     yield finalType;
@@ -240,7 +240,7 @@ public class Typer {
                 TypeNode bodyType = infer(body, localEnv);
 
                 if (declaredReturnType != null) {
-                    unify(bodyType, declaredReturnType);
+                    unifyAssignable(declaredReturnType, bodyType);
                 } else {
                     unify(provisionalReturn, bodyType);
                 }
@@ -422,7 +422,7 @@ public class Typer {
 
                 if (funcType instanceof ArrowNode arrow) {
                     TypeNode actualInput = argTypes.size() == 1 ? argTypes.get(0) : new TupleNode(argTypes);
-                    unify(arrow.inputType(), actualInput);
+                    unifyAssignable(arrow.inputType(), actualInput);
                     yield apply(arrow.returnType());
                 }
 
@@ -696,6 +696,30 @@ public class Typer {
         }
 
         throw new RuntimeException("Cannot unify: " + typeToSurface(ta) + " with " + typeToSurface(tb));
+    }
+
+    private void unifyAssignable(TypeNode expected, TypeNode actual) {
+        TypeNode appliedExpected = apply(expected);
+        TypeNode appliedActual = apply(actual);
+
+        if (appliedExpected instanceof TupleNode expTuple && appliedActual instanceof TupleNode actTuple) {
+            if (expTuple.elements().size() != actTuple.elements().size()) {
+                throw new RuntimeException("Tuple mismatch: " + typeToSurface(appliedExpected) + " vs "
+                        + typeToSurface(appliedActual));
+            }
+            for (int i = 0; i < expTuple.elements().size(); i++) {
+                unifyAssignable(expTuple.elements().get(i), actTuple.elements().get(i));
+            }
+            return;
+        }
+
+        if (appliedExpected instanceof AtomicNode ea && appliedActual instanceof AtomicNode aa) {
+            if ("float".equalsIgnoreCase(ea.name()) && "int".equalsIgnoreCase(aa.name())) {
+                return;
+            }
+        }
+
+        unify(expected, actual);
     }
 
     private void bind(TypeVar v, TypeNode t) {
