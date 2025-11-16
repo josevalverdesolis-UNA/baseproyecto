@@ -584,7 +584,7 @@ public class AstTranspiler {
         return !trimmed.isEmpty() && (trimmed.charAt(0) == '-' || trimmed.charAt(0) == '+');
     }
 
-    private String parenthesizeUnaryOperand(String code) {
+  private String parenthesizeUnaryOperand(String code) {
         if (needsParenthesesForUnary(code)) {
             return "(" + code + ")";
         }
@@ -697,7 +697,6 @@ public class AstTranspiler {
         }
         return false;
     }
-
     // --------------------------------------------------------------
     // Auxiliary Methods
     // --------------------------------------------------------------
