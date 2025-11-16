@@ -61,6 +61,10 @@ expr:
         | '(' pureExpr ')'                                  # Parens
         | LBRACK elements? RBRACK               # Lists;
 
+// Mirrors expr but intentionally omits the Cast alternative so grouped expressions
+// cannot be reduced to a Parens(Cast(...)) node. This forces ANTLR to match typed
+// lambda parameters before it considers a parenthesized cast, which fixes constructs
+// such as `(n:int) -> body`.
 pureExpr:
 
         <assoc = right> '(' arguments? ')' ARROW expr
