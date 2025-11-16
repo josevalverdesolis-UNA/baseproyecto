@@ -584,7 +584,7 @@ public class AstTranspiler {
         return !trimmed.isEmpty() && (trimmed.charAt(0) == '-' || trimmed.charAt(0) == '+');
     }
 
-  private String parenthesizeUnaryOperand(String code) {
+    private String parenthesizeUnaryOperand(String code) {
         if (needsParenthesesForUnary(code)) {
             return "(" + code + ")";
         }
@@ -596,10 +596,12 @@ public class AstTranspiler {
             return exprCode;
         }
         if ("Double".equals(javaType)) {
-            return "Double.valueOf(" + exprCode + ")";
+            features.add(Feature.COERCIONS);
+            return "toDouble(" + exprCode + ")";
         }
         if ("Integer".equals(javaType)) {
-            return "Integer.valueOf(" + exprCode + ")";
+            features.add(Feature.COERCIONS);
+            return "toInteger(" + exprCode + ")";
         }
         return "((" + javaType + ")(" + exprCode + "))";
     }
