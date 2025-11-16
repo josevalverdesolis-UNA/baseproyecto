@@ -485,7 +485,6 @@ public class Typer {
                     default -> throw new RuntimeException("Unsupported unary operator: " + operator);
                 };
             }
-
             // Match expression
             case MatchExpression(var matchExpr, var rules) -> {
                 TypeNode matchedType = infer(matchExpr, env);
@@ -727,6 +726,40 @@ public class Typer {
 
     private boolean isAny(TypeNode t) {
         return (t instanceof AtomicNode a) && (a.name().equals("Any") || a.name().equals("any"));
+    }
+  
+    private void coerceNumericOperand(TypeNode operand, String targetAtomic) {
+        TypeNode applied = apply(operand);
+        if (applied instanceof TypeVar || isAny(applied)) {
+            unify(operand, new AtomicNode(targetAtomic));
+            return;
+        }
+        if (applied instanceof AtomicNode atomic) {
+            String name = atomic.name();
+            if (name.equals(targetAtomic)) {
+                return;
+            }
+            if ("float".equals(targetAtomic) && "int".equals(name)) {
+                return;
+            }
+        }
+        throw new RuntimeException(
+                "Type mismatch: expected numeric operand of type " + targetAtomic + ", got "
+                        + typeToSurface(applied));
+    }
+
+    private boolean isNumericCandidate(TypeNode type) {
+        TypeNode applied = apply(type);
+        if (applied instanceof TypeVar) {
+            return true;
+        }
+        if (isAny(applied)) {
+            return true;
+        }
+        if (applied instanceof AtomicNode atomic) {
+            return atomic.name().equals("int") || atomic.name().equals("float");
+        }
+        return false;
     }
 
     private void coerceNumericOperand(TypeNode operand, String targetAtomic) {
