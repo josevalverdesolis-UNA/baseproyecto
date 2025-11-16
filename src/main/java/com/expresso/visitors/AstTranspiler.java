@@ -627,7 +627,7 @@ public class AstTranspiler {
             return argCode;
         }
 
-        return renderCast(javaType, argCode);
+       return renderCast(javaType, argCode);
     }
 
     private String transpileEqualityComparison(String operator, Node left, Node right, Env env, String leftCode,
@@ -699,7 +699,6 @@ public class AstTranspiler {
         }
         return false;
     }
-
     // --------------------------------------------------------------
     // Auxiliary Methods
     // --------------------------------------------------------------

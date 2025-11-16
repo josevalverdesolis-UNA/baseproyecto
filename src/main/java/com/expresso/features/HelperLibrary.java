@@ -6,6 +6,7 @@
 package com.expresso.features;
 
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -17,6 +18,7 @@ import java.util.stream.Collectors;
 public class HelperLibrary {
 
         private static final Map<Feature, String> HELPERS = Map.ofEntries(
+
                         Map.entry(Feature.PRINT,
                                         "public static void print(Object arg){ System.out.println(arg); }"),
                         Map.entry(Feature.POW,
