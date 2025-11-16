@@ -71,18 +71,18 @@ pureExpr:
 
         <assoc = right> '(' arguments? ')' ARROW expr
         | <assoc = right> ID (COLON type)? ARROW expr
-        | '-' expr
-        | '!' expr
+        | '-' pureExpr
+        | '!' pureExpr
         | '^' constructor_call
-        | MATCH expr WITH NEWLINE* match_rule (NEWLINE* PIPE NEWLINE* match_rule)*
-        | expr '(' (expr (',' expr)*)? ')'
-        | <assoc = right> expr op = ('**' | '!**') expr
-        | expr op = ('*' | '/') expr
-        | expr op = ('+' | '-') expr
-        | expr op = ('<' | '<=' | '>' | '>=' | '==' | '!=') expr
-        | expr op = '&&' expr
-        | expr op = '||' expr
-        | <assoc = right> expr QUESTION expr COLON expr
+        | MATCH pureExpr WITH NEWLINE* match_rule (NEWLINE* PIPE NEWLINE* match_rule)*
+        | pureExpr '(' (expr (',' expr)*)? ')'
+        | <assoc = right> pureExpr op = ('**' | '!**') pureExpr
+        | pureExpr op = ('*' | '/') pureExpr
+        | pureExpr op = ('+' | '-') pureExpr
+        | pureExpr op = ('<' | '<=' | '>' | '>=' | '==' | '!=') pureExpr
+        | pureExpr op = '&&' pureExpr
+        | pureExpr op = '||' pureExpr
+        | <assoc = right> pureExpr QUESTION pureExpr COLON pureExpr
         | INT
         | FLOAT
         | BOOLEAN
