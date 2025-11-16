@@ -35,61 +35,95 @@ argument: ID (COLON type)?;
 elements: expr (COMMA expr)*;
 
 // Expresion with precedens and unary '-'
-expr:
-        // Lambdas first (highest precedence, right-associative)
-        <assoc = right> '(' arguments? ')' ARROW expr                 # LambdaParams
-        | <assoc = right> ID (COLON type)? ARROW expr                 # Lambda
+expr
+    : lambdaExpr
+    | ternaryExpr
+    ;
 
-        // Explicit cast: expr : type
-        | expr COLON type                                            # Cast
-        | '-' expr                                                   # UnaryMinus
-        | '!' expr                                                   # LogicalNot
-        | '^' constructor_call                                       # Instantiator
-        | MATCH expr WITH NEWLINE* match_rule
-            (NEWLINE* PIPE NEWLINE* match_rule)*                     # Match
-        | expr '(' (expr (COMMA expr)*)? ')'                         # FuncCall
-        | PRINT '(' expr ')'                                         # PrintExprValue
-        | <assoc = right> expr op = ('**' | '!**') expr              # PowSqrt
-        | expr op = ('*' | '/') expr                                 # MulDiv
-        | expr op = ('+' | '-') expr                                 # AddSub
-        | expr op = ('<' | '<=' | '>' | '>=' | '==' | '!=') expr     # Relational
-        | expr op = '&&' expr                                        # LogicalAnd
-        | expr op = '||' expr                                        # LogicalOr
-        | <assoc = right> expr QUESTION expr COLON expr              # Ternary
-        | INT                                                        # Num
-        | FLOAT                                                      # Num
-        | BOOLEAN                                                    # Bool
-        | STRING                                                     # String
-        | NONE                                                       # None
-        | LBRACK elements? RBRACK                                    # Lists
-        | ID                                                         # Variable
-        | '(' inner=pureExpr ')'                                     # Parens
-        ;
+lambdaExpr
+    : lambdaHead ARROW expr
+    | ID (COLON type)? ARROW expr
+    ;
 
-pureExpr:
-        <assoc = right> '(' arguments? ')' ARROW expr
-        | <assoc = right> ID (COLON type)? ARROW expr
-        | '-' pureExpr
-        | '!' pureExpr
-        | '^' constructor_call
-        | MATCH pureExpr WITH NEWLINE* match_rule (NEWLINE* PIPE NEWLINE* match_rule)*
-        | pureExpr '(' (expr (COMMA expr)*)? ')'
-        | <assoc = right> pureExpr op = ('**' | '!**') pureExpr
-        | pureExpr op = ('*' | '/') pureExpr
-        | pureExpr op = ('+' | '-') pureExpr
-        | pureExpr op = ('<' | '<=' | '>' | '>=' | '==' | '!=') pureExpr
-        | pureExpr op = '&&' pureExpr
-        | pureExpr op = '||' pureExpr
-        | <assoc = right> pureExpr QUESTION pureExpr COLON pureExpr
-        | INT
-        | FLOAT
-        | BOOLEAN
-        | STRING
-        | NONE
-        | ID
-        | '(' pureExpr ')'
-        | LBRACK elements? RBRACK
-        ;
+lambdaHead
+    : '(' arguments? ')'
+    ;
+
+ternaryExpr
+    : logicalOrExpr (QUESTION expr COLON ternaryExpr)?
+    ;
+
+logicalOrExpr
+    : logicalXorExpr ('||' logicalXorExpr)*
+    ;
+
+logicalXorExpr
+    : logicalAndExpr ('^^' logicalAndExpr)*
+    ;
+
+logicalAndExpr
+    : equalityExpr ('&&' equalityExpr)*
+    ;
+
+equalityExpr
+    : relationalExpr (('==' | '!=') relationalExpr)*
+    ;
+
+relationalExpr
+    : additiveExpr (('<' | '<=' | '>' | '>=') additiveExpr)*
+    ;
+
+additiveExpr
+    : multiplicativeExpr (('+' | '-') multiplicativeExpr)*
+    ;
+
+multiplicativeExpr
+    : powerExpr (('*' | '/') powerExpr)*
+    ;
+
+powerExpr
+    : unaryExpr
+    | unaryExpr op = ('**' | '!**') powerExpr
+    ;
+
+unaryExpr
+    : '-' unaryExpr                                              # UnaryMinus
+    | '!' unaryExpr                                              # LogicalNot
+    | '^' constructor_call                                      # Instantiator
+    | MATCH expr WITH NEWLINE* match_rule
+        (NEWLINE* PIPE NEWLINE* match_rule)*                     # Match
+    | postfixExpr
+    ;
+
+postfixExpr
+    : primaryExpr postfixPart*
+    ;
+
+postfixPart
+    : '(' (expr (COMMA expr)*)? ')'                              # FuncCall
+    | COLON type                                                 # Cast
+    ;
+
+primaryExpr
+    : PRINT '(' expr ')'                                         # PrintExprValue
+    | tupleExpr
+    | groupExpr
+    | LBRACK elements? RBRACK                                    # Lists
+    | INT                                                        # Num
+    | FLOAT                                                      # Num
+    | BOOLEAN                                                    # Bool
+    | STRING                                                     # String
+    | NONE                                                       # None
+    | ID                                                         # Variable
+    ;
+
+tupleExpr
+    : '(' expr (COMMA expr)+ ')'
+    ;
+
+groupExpr
+    : '(' expr ')'
+    ;
 
 // ---------------------- Matching Rules ----------------------
 match_rule: pattern guard? ARROW expr;
