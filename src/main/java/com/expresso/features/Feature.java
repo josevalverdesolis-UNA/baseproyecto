@@ -12,6 +12,7 @@ package com.expresso.features;
 public enum Feature {
     POW,
     PRINT,
+    COERCIONS,
     FUNCTIONAL,
     LIST,
     LAMBDA,
