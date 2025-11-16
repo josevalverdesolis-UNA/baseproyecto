@@ -9,8 +9,9 @@ import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import org.antlr.v4.runtime.ParserRuleContext;
+
 import com.expresso.ast.Argument;
-import com.expresso.ast.AtomicNode;
 import com.expresso.ast.BinaryOp;
 import com.expresso.ast.BooleanNode;
 import com.expresso.ast.CastNode;
@@ -182,7 +183,7 @@ public class AstBuilder extends ExprBaseVisitor<Node> {
 
     @Override
     public Node visitParens(ExprParser.ParensContext ctx) {
-    return visit(ctx.expr());  // paréntesis desaparecen
+        return visit(ctx.expr()); // parentheses disappear
     }
 
 
@@ -223,16 +224,20 @@ public class AstBuilder extends ExprBaseVisitor<Node> {
     // -----------------------------------------------------------------------------------
     @Override
     public Lambda visitLambdaParams(ExprParser.LambdaParamsContext ctx) {
-        List<String> paramNames = extractParameterNames(ctx.arguments());
-        Node body = visit(ctx.expr());
+        ExprParser.LambdaParamListContext paramsCtx = ctx.getRuleContext(ExprParser.LambdaParamListContext.class, 0);
+        List<String> paramNames = extractParameterNames(paramsCtx);
+        ExprParser.ExprContext bodyCtx = extractExprFrom(ctx);
+        Node body = visit(bodyCtx);
 
         return new Lambda(paramNames, body);
     }
 
     @Override
     public Lambda visitLambda(ExprParser.LambdaContext ctx) {
-        String paramName = ctx.ID().getText();
-        Node body = visit(ctx.expr());
+        var idNode = ctx.getToken(ExprParser.ID, 0);
+        String paramName = idNode != null ? idNode.getText() : "_";
+        ExprParser.ExprContext bodyCtx = extractExprFrom(ctx);
+        Node body = visit(bodyCtx);
 
         return new Lambda(List.of(paramName), body);
     }
@@ -319,32 +324,26 @@ public class AstBuilder extends ExprBaseVisitor<Node> {
                 .collect(Collectors.toList());
     }
 
-    // Extract parameter names from ArgumentsContext
-    private List<String> extractParameterNames(ExprParser.ArgumentsContext ctx) {
+    // Extract parameter names from lambdaParamList
+    private List<String> extractParameterNames(ExprParser.LambdaParamListContext ctx) {
         if (ctx == null) {
             return Collections.emptyList();
         }
 
-        return ctx.argument().stream()
+        return ctx.lambdaParam().stream()
                 .map(this::extractParameterName)
                 .filter(name -> name != null)
                 .collect(Collectors.toList());
     }
 
-    // Extract single parameter name from ArgumentContext
-    private String extractParameterName(ExprParser.ArgumentContext argCtx) {
-        // Explicit annotation: x: Int
-        if (argCtx.ID() != null) {
-            return argCtx.ID().getText();
-        }
+    // Extract single parameter name from LambdaParamContext
+    private String extractParameterName(ExprParser.LambdaParamContext paramCtx) {
+        var idNode = paramCtx.getToken(ExprParser.ID, 0);
+        return idNode != null ? idNode.getText() : null;
+    }
 
-        // Implicit: just "x" (parsed as atomic type)
-        TypeNode typeNode = typeBuilder.visit(argCtx.type());
-        if (typeNode instanceof AtomicNode atomic) {
-            return atomic.name();
-        }
-
-        return null;
+    private ExprParser.ExprContext extractExprFrom(ParserRuleContext ctx) {
+        return ctx.getRuleContext(ExprParser.ExprContext.class, 0);
     }
 
     // -----------------------------------------------------------------------------------
