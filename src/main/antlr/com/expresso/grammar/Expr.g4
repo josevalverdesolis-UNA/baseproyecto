@@ -107,7 +107,7 @@ postfixPart
 primaryExpr
     : PRINT '(' expr ')'                                         # PrintExprValue
     | tupleExpr                                                  # TupleLiteral
-    | groupExpr                                                  # GroupExpr
+    | groupExpr                                                  # GroupValue
     | LBRACK elements? RBRACK                                    # ListLiteral
     | INT                                                        # IntLiteral
     | FLOAT                                                      # FloatLiteral
