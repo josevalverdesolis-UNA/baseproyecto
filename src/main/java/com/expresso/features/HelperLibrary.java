@@ -18,12 +18,13 @@ import java.util.stream.Collectors;
 public class HelperLibrary {
 
         private static final Map<Feature, String> HELPERS = Map.ofEntries(
-                        Entry.of(Feature.PRINT,
+
+                        Map.entry(Feature.PRINT,
                                         "public static void print(Object arg){ System.out.println(arg); }"),
-                        Entry.of(Feature.POW,
+                        Map.entry(Feature.POW,
                                         "public static int pow(int x, int e){ return (int)Math.pow(x, e); }\n"
                                                         + "public static double pow(double x, double e){ return Math.pow(x, e); }"),
-                        Entry.of(Feature.COERCIONS,
+                        Map.entry(Feature.COERCIONS,
                                         "public static Double toDouble(Object value){\n"
                                                         + "\tif(value == null) return null;\n"
                                                         + "\tif(value instanceof Double d) return d;\n"

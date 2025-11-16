@@ -627,7 +627,7 @@ public class AstTranspiler {
             return argCode;
         }
 
-        return "((" + javaType + ")(" + argCode + "))";
+       return renderCast(javaType, argCode);
     }
 
     private String transpileEqualityComparison(String operator, Node left, Node right, Env env, String leftCode,
