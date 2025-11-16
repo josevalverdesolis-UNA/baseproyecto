@@ -60,7 +60,7 @@ expr:
         | ID                                                    # Variable
         // Grouped expressions intentionally reuse pureExpr so typed lambdas outrank casts while
         // ParensContext still exposes ctx.expr() to the visitors via the labeled element.
-        | '(' expr=pureExpr ')'                                  # Parens
+        | '(' inner=pureExpr ')'                                 # Parens                               # Parens
         | LBRACK elements? RBRACK               # Lists;
 
 // Mirrors expr but intentionally omits the Cast alternative so grouped expressions
