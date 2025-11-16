@@ -5,169 +5,171 @@
 
 grammar Expr;
 
-// This grammar it's almost the same that the one used in class Entry point
 prog: stat* EOF;
 
-// A sentence can be and expresion and a NEWLINE or just a NEWLINE Statements
 stat:
-	LET ID (COLON type)? '=' expr (NEWLINE | EOF)? # LetStatement
-	| FUN ID '(' arguments? ')' (COLON type)? '=' expr (
-		NEWLINE
-		| EOF
-	)?                                       # Fun
-	| data (NEWLINE | EOF)?                  # DataDeclaration
-	| PRINT '(' expr ')' (NEWLINE | EOF)?    # PrintStatement
-	| expr NEWLINE                           # PrintExpr
-	| NEWLINE                                # Blank;
+      LET ID (COLON type)? '=' expr (NEWLINE | EOF)?
+    | FUN ID '(' arguments? ')' (COLON type)? '=' expr (NEWLINE | EOF)?
+    | DATA ID '=' dataAlts (NEWLINE | EOF)?
+    | PRINT '(' expr ')' (NEWLINE | EOF)?
+    | expr NEWLINE
+    | NEWLINE
+    ;
 
-// Data declaration
-data: DATA ID '=' LBRACE NEWLINE* constructors NEWLINE* RBRACE;
-
-// Constructors of a Data Declaration
-constructors: constructor (COMMA NEWLINE* constructor)*;
-constructor: ID ('(' arguments ')')?;
-
-// Arguments
 arguments: param (COMMA param)*;
 param: ID (COLON type)?;
 
-// Elements of a Lists
+argumentList: expr (COMMA expr)*;
+
+dataAlts: dataAlt (PIPE dataAlt)*;
+dataAlt: ID ('(' typeList? ')')?;
+typeList: type (COMMA type)*;
+
 elements: expr (COMMA expr)*;
 
-// Expresion with precedens and unary '-'
-expr:
-        // Lambdas first (highest precedence, right-associative)
-        // They allow typed and untyped parameters and need to bind before casts.
-        <assoc = right> '(' arguments? ')' ARROW expr                 # LambdaParams
-        | <assoc = right> ID (COLON type)? ARROW expr                 # Lambda
+expr
+    : lambdaExpr
+    | ternaryExpr
+    ;
 
-        // Explicit cast: expr : type
-        | expr COLON type                                            # Cast
-        | '-' expr                                                   # UnaryMinus
-        | '!' expr                                                   # LogicalNot
-        | '^' constructor_call                                       # Instantiator
-        | MATCH expr WITH NEWLINE* match_rule
-            (NEWLINE* PIPE NEWLINE* match_rule)*                     # Match
-        | expr '(' (expr (COMMA expr)*)? ')'                         # FuncCall
-        | <assoc = right> expr op = ('**' | '!**') expr              # PowSqrt
-        | expr op = ('*' | '/') expr                                 # MulDiv
-        | expr op = ('+' | '-') expr                                 # AddSub
-        | expr op = ('<' | '<=' | '>' | '>=' | '==' | '!=') expr     # Relational
-        | expr op = '&&' expr                                        # LogicalAnd
-        | expr op = '||' expr                                        # LogicalOr
-        | <assoc = right> expr QUESTION expr COLON expr              # Ternary
-        | INT                                                        # Num
-        | FLOAT                                                      # Num
-        | BOOLEAN                                                    # Bool
-        | STRING                                                     # String
-        | NONE                                                       # None
-        | ID                                                         # Variable
-        | '(' inner=pureExpr ')'                                     # Parens
-        | LBRACK elements? RBRACK                                    # Lists
-        ;
+lambdaExpr
+    : '(' arguments? ')' ARROW expr
+    | ID (COLON type)? ARROW expr
+    ;
 
-// Mirrors expr but intentionally omits the Cast alternative so grouped expressions
-// cannot be reduced to a Parens(Cast(...)) node. This forces ANTLR to match typed
-// lambda parameters before it considers a parenthesized cast, which fixes constructs
-// such as `(n:int) -> body`.
-pureExpr:
-        <assoc = right> '(' arguments? ')' ARROW expr
-        | <assoc = right> ID (COLON type)? ARROW expr
-        | '-' pureExpr
-        | '!' pureExpr
-        | '^' constructor_call
-        | MATCH pureExpr WITH NEWLINE* match_rule (NEWLINE* PIPE NEWLINE* match_rule)*
-        | pureExpr '(' (expr (COMMA expr)*)? ')'
-        | <assoc = right> pureExpr op = ('**' | '!**') pureExpr
-        | pureExpr op = ('*' | '/') pureExpr
-        | pureExpr op = ('+' | '-') pureExpr
-        | pureExpr op = ('<' | '<=' | '>' | '>=' | '==' | '!=') pureExpr
-        | pureExpr op = '&&' pureExpr
-        | pureExpr op = '||' pureExpr
-        | <assoc = right> pureExpr QUESTION pureExpr COLON pureExpr
-        | INT
-        | FLOAT
-        | BOOLEAN
-        | STRING
-        | NONE
-        | ID
-        | '(' pureExpr ')'
-        | LBRACK elements? RBRACK
-        ;
+ternaryExpr
+    : logicalOr (QUESTION expr COLON expr)?
+    ;
 
-// ---------------------- Matching Rules ----------------------
-match_rule: pattern guard? ARROW expr;
+logicalOr
+    : logicalAnd ( '||' logicalAnd )*
+    ;
+
+logicalAnd
+    : equality ( '&&' equality )*
+    ;
+
+equality
+    : comparison ( ('==' | '!=') comparison )*
+    ;
+
+comparison
+    : additive ( ('<' | '<=' | '>' | '>=') additive )*
+    ;
+
+additive
+    : multiplicative ( ('+' | '-') multiplicative )*
+    ;
+
+multiplicative
+    : unary ( ('*' | '/' | '%') unary )*
+    ;
+
+unary
+    : '!' unary
+    | '-' unary
+    | '^' constructor_call
+    | postfix
+    ;
+
+postfix
+    : funcCall
+    | primary
+    ;
+
+funcCall
+    : primary '(' argumentList? ')' ( '(' argumentList? ')' )*
+    ;
+
+primary
+    : literal
+    | ID
+    | listLiteral
+    | matchExpr
+    | tupleLiteral
+    | '(' expr ')'
+    ;
+
+literal
+    : INT
+    | FLOAT
+    | BOOLEAN
+    | STRING
+    | NONE
+    ;
+
+listLiteral: LBRACK elements? RBRACK;
+
+tupleLiteral: '(' expr (COMMA expr)+ ')';
+
+matchExpr
+    : MATCH expr WITH NEWLINE* matchArm (NEWLINE* matchArm)*
+    ;
+
+matchArm: PIPE pattern guard? ARROW expr;
 
 guard: IF expr;
 
-pattern: data_pattern | native_pattern;
+pattern: data_pattern | native_pattern | UNDERSCORE;
 
-data_pattern: ID ('(' pattern_params ')')?;
+data_pattern: ID ('(' pattern_params? ')')?;
+pattern_params: pattern (COMMA pattern)*;
 
-pattern_params: data_pattern (COMMA data_pattern)*;
+native_pattern
+    : NONE
+    | BOOLEAN
+    | STRING
+    | INT
+    | FLOAT
+    | ID
+    ;
 
-native_pattern:
-    NONE        # NoneConstant
-    | BOOLEAN   # BoolConstant
-    | STRING    # StringConstant
-    | INT       # NumericConstant
-    | FLOAT     # NumericConstant
-    | ID        # VariablePattern;
-
-// Params
+constructor_call: ID '(' params? ')' | ID;
 params: expr (COMMA expr)*;
 
-//Constructor call
-constructor_call: ID '(' params ')' | ID;
+type
+    : typeNoArrow (ARROW type)?
+    ;
 
-// Types
-atomic:
-    ANY // Object
-    | VOID // Void
-    | INT_TYPE // Integer
-    | FLOAT_TYPE // Float
-    | STRING_TYPE // String
-    | ID; // Usergiven
+typeNoArrow
+    : atomic
+    | '(' type (COMMA type)+ ')'
+    | '(' type ')'
+    ;
 
-tuple: '(' atomic (COMMA atomic)* ')';
+atomic
+    : ANY
+    | VOID
+    | INT_TYPE
+    | FLOAT_TYPE
+    | STRING_TYPE
+    | BOOLEAN_TYPE
+    | ID
+    ;
 
-type:
-    atomic ARROW type           # AtomArrowType //ArrowType because can have arrow
-    | atomic                    # AtomType
-    | tuple ARROW type          # TupleArrowType //ArrowType because can have arrow
-    | tuple                     # TupleType
-    | '(' type ')' ARROW type   # ParenArrowType //ArrowType because can have arrow
-    | '(' type ')'              # ParenType;
-
-//-----------------------------------------------------------------------------------------------------------
-// Lexer LEXER In ANTLR the lexer rules are defined with capital letters A lexer rule means how to
-// identify tokens
-// -----------------------------------------------------------------------------------------------------------
-// Keywords
 DATA: 'data';
 FUN: 'fun';
 LET: 'let';
 PRINT: 'print';
-IF: 'if'; // Para el guard
+IF: 'if';
 MATCH: 'match';
 WITH: 'with';
 ANY: 'any';
 VOID: 'void';
-INT_TYPE: 'int'; // Para el tipo
-FLOAT_TYPE: 'float'; // Para el tipo
-STRING_TYPE: 'string'; // Para el tipo
+INT_TYPE: 'int';
+FLOAT_TYPE: 'float';
+STRING_TYPE: 'string';
+BOOLEAN_TYPE: 'boolean';
 BOOLEAN: 'true' | 'false';
 NONE: 'none';
+UNDERSCORE: '_';
 
-// Identifiers
 ID: [a-zA-Z_][a-zA-Z0-9_]*;
 
-// Types
 FLOAT: [0-9]+ '.' [0-9]* | '.' [0-9]+;
 INT: [0-9]+;
 STRING: '"' (~["\\\r\n] | '\\' .)* '"';
 
-// Symbols
 LBRACE: '{';
 RBRACE: '}';
 LBRACK: '[';
@@ -178,17 +180,7 @@ COLON: ':';
 ARROW: '->';
 PIPE: '|';
 
-// Whitespace and newlines
 WS: [ \t]+ -> skip;
 NEWLINE: ('\r'? '\n');
-
-// Comments
 LINECOMMENT: '//' ~[\r\n]* -> channel(HIDDEN);
 BLOCKCOMMENT: '/*' .*? '*/' -> channel(HIDDEN);
-//~ Means any symbol so LINECOMMENT accepted any caracter excepted \r and \n . means all caracter *
-// as we know means 1 or many and ? means none or many. So why use *? it's like confuse or reduntant
-// The real meaning is that *? makes it non-greedy. So what it means, well it means that it will
-// stop in the first */.
-
-// [CHANGELOG] Archivos modificados en esta iteración:
-// - src/main/antlr/com/expresso/grammar/Expr.g4
