@@ -21,14 +21,20 @@ import com.expresso.ast.BooleanNode;
 import com.expresso.ast.CastNode;
 import com.expresso.ast.Constructor;
 import com.expresso.ast.DataDeclaration;
+import com.expresso.ast.DataPattern;
 import com.expresso.ast.FunNode;
 import com.expresso.ast.FuncCall;
 import com.expresso.ast.InstantiatorNode;
 import com.expresso.ast.Lambda;
 import com.expresso.ast.LetStatement;
+import com.expresso.ast.ListNode;
+import com.expresso.ast.MatchExpression;
+import com.expresso.ast.MatchRule;
+import com.expresso.ast.NativePattern;
 import com.expresso.ast.Node;
 import com.expresso.ast.NoneNode;
 import com.expresso.ast.Num;
+import com.expresso.ast.Pattern;
 import com.expresso.ast.PrintStatement;
 import com.expresso.ast.Program;
 import com.expresso.ast.StringNode;
@@ -36,6 +42,7 @@ import com.expresso.ast.TernaryExpression;
 import com.expresso.ast.TupleNode;
 import com.expresso.ast.TypeNode;
 import com.expresso.ast.TypeVar;
+import com.expresso.ast.UnaryOp;
 import com.expresso.ast.Variable;
 
 // Typer class for type inference
@@ -44,9 +51,13 @@ public class Typer {
 
     private final Env globalEnv;
     // Minimal symbol tables for the typer
-    private final Set<String> primitiveTypes = Set.of("any", "void", "int", "float", "string", "boolean");
+    private static final String LIST_SENTINEL = "__list__";
+
+    private final Set<String> primitiveTypes = new HashSet<>(
+            List.of("any", "void", "int", "float", "string", "boolean", LIST_SENTINEL));
     private final Set<String> userTypes = new HashSet<>(); // data type names
     private final Map<String, ConstructorSig> constructors = new HashMap<>(); // ctor name -> signature
+    private final Set<String> numericTypeVars = new HashSet<>();
 
     private record ConstructorSig(String dataType, List<TypeNode> paramTypes) {
     }
@@ -99,7 +110,7 @@ public class Typer {
             // Number → Int
             case Num pNumber -> {
                 Objects.requireNonNull(pNumber);
-                yield new AtomicNode("int");
+                yield freshNumeric();
             }
 
             // Strings → String
@@ -117,14 +128,21 @@ public class Typer {
             // None → Void
             case NoneNode() -> new AtomicNode("void");
 
+            case ListNode(var elements) -> {
+                TypeNode elementType = fresh();
+                for (Node element : elements) {
+                    TypeNode inferred = infer(element, env);
+                    unify(elementType, inferred);
+                }
+                yield listOf(apply(elementType));
+            }
+
             // Cast → validate target type
             case CastNode(var expr, var targetType) -> {
-                // Infer the expression type (para validar que existe)
-                infer(expr, env);
-                // Validate if target type exists
                 assertTypeExists(targetType);
-                // Return the target type
-                yield targetType;
+                TypeNode sourceType = infer(expr, env);
+                unify(sourceType, targetType);
+                yield apply(targetType);
             }
 
             // Variables
@@ -201,8 +219,13 @@ public class Typer {
                 List<TypeNode> paramTypes = new ArrayList<>();
                 List<String> paramNames = new ArrayList<>();
                 for (var a : params) {
-                    TypeNode pt = a.type() != null ? a.type() : new AtomicNode("any");
-                    if (a.type() != null) assertTypeExists(pt);
+                    TypeNode pt;
+                    if (a.type() != null) {
+                        assertTypeExists(a.type());
+                        pt = a.type();
+                    } else {
+                        pt = fresh();
+                    }
                     paramTypes.add(pt);
                     String pname = a.name() != null ? a.name() : ("p" + (paramNames.size() + 1));
                     paramNames.add(pname);
@@ -258,10 +281,14 @@ public class Typer {
                     // Check if exist constructor argument types
                     List<TypeNode> paramTypes = new ArrayList<>();
                     for (Argument a : c.arguments()) {
+                        TypeNode paramType;
                         if (a.type() != null) {
                             assertTypeExists(a.type());
-                            paramTypes.add(a.type());
+                            paramType = a.type();
+                        } else {
+                            paramType = fresh();
                         }
+                        paramTypes.add(paramType);
                     }
                     constructors.put(cname, new ConstructorSig(typeName, paramTypes));
                 }
@@ -279,9 +306,10 @@ public class Typer {
                     throw new RuntimeException("Arity mismatch for constructor '" + ctorName + "': expected "
                             + sig.paramTypes().size() + ", got " + args.size());
                 }
-                // Infer args to check type
-                for (Node arg : args) {
-                    infer(arg, env);
+                for (int i = 0; i < args.size(); i++) {
+                    TypeNode expected = sig.paramTypes().get(i);
+                    TypeNode actual = infer(args.get(i), env);
+                    unify(actual, expected);
                 }
                 // Resulting type is the data type
                 yield new AtomicNode(sig.dataType());
@@ -298,38 +326,62 @@ public class Typer {
                 Objects.requireNonNull(op);
                 TypeNode lt = infer(left, env);
                 TypeNode rt = infer(right, env);
-                // String concatenation
-                if ("+".equals(op) && (isAtomic(lt, "string") || isAtomic(rt, "string"))) {
+                TypeNode leftType = apply(lt);
+                TypeNode rightType = apply(rt);
+
+                if ("+".equals(op) && (isAtomic(leftType, "string") || isAtomic(rightType, "string"))) {
                     yield new AtomicNode("string");
                 }
 
-                // Relational operators -> boolean result, numeric operands
-                if (isRelational(op)) {
-                    unify(lt, new AtomicNode("int"));
-                    unify(rt, new AtomicNode("int"));
-                    yield new AtomicNode("boolean");
+                if ("+".equals(op) && (isListType(leftType) || isListType(rightType))) {
+                    TypeNode elementType = fresh();
+                    TypeNode listType = listOf(elementType);
+                    unify(lt, listType);
+                    unify(rt, listType);
+                    yield listOf(apply(elementType));
                 }
 
-                // Logical operators -> boolean operands & result
                 if (isLogical(op)) {
-                    unify(lt, new AtomicNode("boolean"));
-                    unify(rt, new AtomicNode("boolean"));
+                    TypeNode boolType = new AtomicNode("boolean");
+                    unify(lt, boolType);
+                    unify(rt, boolType);
+                    yield boolType;
+                }
+
+                if (isOrdering(op)) {
+                    TypeNode numeric = freshNumeric();
+                    unify(lt, numeric);
+                    unify(rt, numeric);
                     yield new AtomicNode("boolean");
                 }
 
-                TypeNode opType = env.find(op);
-                if (opType == null) {
-                    unify(lt, new AtomicNode("int"));
-                    unify(rt, new AtomicNode("int"));
-                    yield new AtomicNode("int");
+                if (isEquality(op)) {
+                    unify(lt, rt);
+                    yield new AtomicNode("boolean");
                 }
-                TypeNode appliedOpType = apply(opType);
-                if (appliedOpType instanceof ArrowNode arrow) {
-                    TypeNode argsType = new TupleNode(List.of(apply(lt), apply(rt)));
-                    unify(arrow.inputType(), argsType);
-                    yield apply(arrow.returnType());
+
+                if (isArithmetic(op)) {
+                    TypeNode numeric = freshNumeric();
+                    unify(lt, numeric);
+                    unify(rt, numeric);
+                    yield apply(numeric);
                 }
-                throw new RuntimeException("Operator '" + op + "' is not a function");
+
+                throw new RuntimeException("Unsupported operator: " + op);
+            }
+
+            case UnaryOp(var operator, var expression) -> {
+                TypeNode exprType = infer(expression, env);
+                if ("!".equals(operator)) {
+                    unify(exprType, new AtomicNode("boolean"));
+                    yield new AtomicNode("boolean");
+                }
+                if ("-".equals(operator) || "+".equals(operator)) {
+                    TypeNode numeric = freshNumeric();
+                    unify(exprType, numeric);
+                    yield apply(numeric);
+                }
+                throw new RuntimeException("Unknown unary operator: " + operator);
             }
 
             // Lambda
@@ -368,27 +420,40 @@ public class Typer {
 
             // Ternary Expression
             case TernaryExpression(var condition, var trueBranch, var falseBranch) -> {
-                TypeNode condType = apply(infer(condition, env));
-                // Allow condition to be int OR boolean per spec exception
-                // If it's a type variable, try to unify with int
-                if (condType instanceof TypeVar) {
-                    unify(condType, new AtomicNode("int"));
-                    condType = apply(condType);
-                }
-                if (!isAtomic(condType, "int") && !isAtomic(condType, "boolean")) {
-                    throw new RuntimeException(
-                            "Ternary condition must be int or boolean, got: " + typeToSurface(condType));
-                }
+                TypeNode condType = infer(condition, env);
+                unify(condType, new AtomicNode("boolean"));
 
                 TypeNode trueType = infer(trueBranch, env);
                 TypeNode falseType = infer(falseBranch, env);
 
-                // Unify both branches to a common type
                 unify(trueType, falseType);
                 yield apply(trueType);
             }
 
-            default -> new AtomicNode("any");
+            case MatchExpression(var expression, var rules) -> {
+                if (rules.isEmpty()) {
+                    throw new RuntimeException("Match expressions require at least one rule");
+                }
+                TypeNode scrutineeType = infer(expression, env);
+                TypeNode resultType = null;
+                for (MatchRule rule : rules) {
+                    Env ruleEnv = new Env(env);
+                    checkPattern(rule.pattern(), scrutineeType, ruleEnv);
+                    if (rule.guard() != null) {
+                        TypeNode guardType = infer(rule.guard(), ruleEnv);
+                        unify(guardType, new AtomicNode("boolean"));
+                    }
+                    TypeNode branchType = infer(rule.expression(), ruleEnv);
+                    if (resultType == null) {
+                        resultType = branchType;
+                    } else {
+                        unify(resultType, branchType);
+                    }
+                }
+                yield apply(resultType);
+            }
+
+            default -> throw new RuntimeException("Unsupported node: " + node.getClass().getSimpleName());
         };
     }
 
@@ -428,7 +493,11 @@ public class Typer {
     }
 
     private String typeToSurface(TypeNode t) {
-        return switch (t) {
+        TypeNode applied = apply(t);
+        if (isListType(applied)) {
+            return "[" + typeToSurface(getListElementType(applied)) + "]";
+        }
+        return switch (applied) {
             case AtomicNode a -> a.name();
             case TupleNode tuple -> "(" + tuple.elements().stream().map(this::typeToSurface)
                     .reduce((a, b) -> a + ", " + b).orElse("") + ")";
@@ -441,6 +510,12 @@ public class Typer {
     // Unification
     private TypeNode fresh() {
         return new TypeVar("t" + (tvCounter++));
+    }
+
+    private TypeNode freshNumeric() {
+        TypeVar numeric = (TypeVar) fresh();
+        numericTypeVars.add(numeric.name());
+        return numeric;
     }
 
     public TypeNode apply(TypeNode t) {
@@ -519,6 +594,7 @@ public class Typer {
         if (occurs(v, t)) {
             throw new RuntimeException("Check failed: " + v.name() + " in " + typeToSurface(t));
         }
+        enforceNumericConstraint(v, t);
         subst.put(v.name(), t);
     }
 
@@ -544,15 +620,110 @@ public class Typer {
         return (t instanceof AtomicNode a) && (a.name().equals("Any") || a.name().equals("any"));
     }
 
-    private boolean isRelational(String op) {
-        return Set.of("<", "<=", ">", ">=", "==", "!=").contains(op);
-    }
-
     private boolean isLogical(String op) {
         return Set.of("&&", "||").contains(op);
     }
 
     private boolean isAtomic(TypeNode t, String name) {
         return t instanceof AtomicNode a && a.name().equals(name);
+    }
+
+    private boolean isOrdering(String op) {
+        return Set.of("<", "<=", ">", ">=").contains(op);
+    }
+
+    private boolean isEquality(String op) {
+        return Set.of("==", "!=").contains(op);
+    }
+
+    private boolean isArithmetic(String op) {
+        return Set.of("+", "-", "*", "/", "**", "!**").contains(op);
+    }
+
+    private TypeNode listOf(TypeNode elementType) {
+        return new TupleNode(List.of(new AtomicNode(LIST_SENTINEL), elementType));
+    }
+
+    private boolean isListType(TypeNode t) {
+        TypeNode applied = apply(t);
+        if (applied instanceof TupleNode tuple && tuple.elements().size() == 2) {
+            TypeNode head = tuple.elements().get(0);
+            return head instanceof AtomicNode a && LIST_SENTINEL.equals(a.name());
+        }
+        return false;
+    }
+
+    private TypeNode getListElementType(TypeNode listType) {
+        TupleNode tuple = (TupleNode) apply(listType);
+        return tuple.elements().get(1);
+    }
+
+    private void checkPattern(Pattern pattern, TypeNode expectedType, Env env) {
+        if (pattern instanceof DataPattern dataPattern) {
+            checkDataPattern(dataPattern, expectedType, env);
+        } else if (pattern instanceof NativePattern nativePattern) {
+            checkNativePattern(nativePattern, expectedType, env);
+        } else {
+            throw new RuntimeException("Unknown pattern type: " + pattern.getClass().getSimpleName());
+        }
+    }
+
+    private void checkDataPattern(DataPattern pattern, TypeNode expectedType, Env env) {
+        ConstructorSig sig = constructors.get(pattern.constructorName());
+        if (sig == null) {
+            throw new RuntimeException("Unknown constructor in pattern: " + pattern.constructorName());
+        }
+        TypeNode dataType = new AtomicNode(sig.dataType());
+        unify(expectedType, dataType);
+        if (pattern.params().size() != sig.paramTypes().size()) {
+            throw new RuntimeException(
+                    "Pattern arity mismatch for constructor " + pattern.constructorName());
+        }
+        for (int i = 0; i < pattern.params().size(); i++) {
+            TypeNode childExpected = sig.paramTypes().get(i);
+            checkDataPattern(pattern.params().get(i), childExpected, env);
+        }
+    }
+
+    private void checkNativePattern(NativePattern pattern, TypeNode expectedType, Env env) {
+        switch (pattern.type()) {
+            case NONE -> unify(expectedType, new AtomicNode("void"));
+            case BOOLEAN -> unify(expectedType, new AtomicNode("boolean"));
+            case STRING -> unify(expectedType, new AtomicNode("string"));
+            case NUMERIC -> {
+                Object value = pattern.value();
+                if (value instanceof Integer || value instanceof Long) {
+                    unify(expectedType, new AtomicNode("int"));
+                } else {
+                    unify(expectedType, new AtomicNode("float"));
+                }
+            }
+            case VARIABLE -> {
+                if (pattern.isWildcard()) {
+                    return;
+                }
+                String name = String.valueOf(pattern.value());
+                TypeNode binding = apply(expectedType);
+                env.define(name, binding);
+            }
+        }
+    }
+
+    private void enforceNumericConstraint(TypeVar v, TypeNode target) {
+        if (!numericTypeVars.contains(v.name())) {
+            return;
+        }
+        TypeNode applied = apply(target);
+        if (applied instanceof TypeVar tv) {
+            numericTypeVars.add(tv.name());
+            return;
+        }
+        if (applied instanceof AtomicNode atom) {
+            if (!Set.of("int", "float").contains(atom.name())) {
+                throw new RuntimeException("Expected numeric type, got: " + typeToSurface(applied));
+            }
+            return;
+        }
+        throw new RuntimeException("Expected numeric type, got: " + typeToSurface(applied));
     }
 }

@@ -5,7 +5,6 @@
 
 package com.expresso;
 
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Optional;
@@ -35,6 +34,8 @@ import com.expresso.visitors.AstTranspiler;
 import com.expresso.visitors.FeatureCollector;
 
 public class Pipeline {
+
+    private static final String LIST_SENTINEL = "__list__";
 
     // --------------------------------------------------------------
     // Type Check: Validate types and generate .typings file
@@ -114,24 +115,11 @@ public class Pipeline {
         Function<String, String> logger = Utils.logIfVerbose("EVALUATE", config.verbose());
         Utils.log(logger.apply("Evaluating AST..."));
 
-        try {
-            String content = Files.readString(Paths.get(config.inputFile()));
-            return Utils.parseAST(content, logger)
-                    .map(ast -> {
-                        Utils.log(logger.apply("#--- Evaluating AST... ---#"));
-
-                        // New evaluator based on the switch with patterns
-                        Object result = AstEvaluator.evaluate(ast);
-
-                        System.out.println(result);
-                        Utils.log(logger.apply("#--- AST evaluated successfully ---#"));
-                        return true;
-                    })
-                    .orElse(false);
-        } catch (IOException e) {
-            Utils.logError("Error reading file for evaluation: " + e.getMessage());
-            return false;
-        }
+        return Utils.prepareFile(config.inputFile(), config.outputPath(), logger)
+                .flatMap(filePath -> Utils.readExpressoFile(filePath, logger))
+                .flatMap(content -> processASTWithVisualization(content, logger, config))
+                .map(result -> evaluateAfterTyping(result.ast(), config.inputFile(), logger))
+                .orElse(false);
     }
 
     // --------------------------------------------------------------
@@ -163,16 +151,31 @@ public class Pipeline {
         }
     }
 
+    private static boolean evaluateAfterTyping(Program ast, String inputFile, Function<String, String> logger) {
+        if (!performTypeChecking(ast, inputFile, logger)) {
+            return false;
+        }
+        try {
+            Utils.log(logger.apply("#--- Evaluating AST... ---#"));
+            Object result = AstEvaluator.evaluate(ast);
+            System.out.println(result);
+            Utils.log(logger.apply("#--- AST evaluated successfully ---#"));
+            return true;
+        } finally {
+            sharedTyper.remove();
+        }
+    }
+
     // Generate the file .expresso.typings
     private static void generateTypingsFile(Program ast, Env env, Typer typer, String inputFile,
             Function<String, String> logger) {
         try {
-            var inputPath = java.nio.file.Paths.get(inputFile);
+            var inputPath = Paths.get(inputFile);
             var parent = inputPath.getParent();
             var baseName = inputPath.getFileName().toString(); // HelloWorld.expresso
             var typingsName = baseName + ".typings"; // HelloWorld.expresso.typings
             var outPath = (parent == null)
-                    ? java.nio.file.Paths.get(typingsName)
+                    ? Paths.get(typingsName)
                     : parent.resolve(typingsName);
 
             StringBuilder sb = new StringBuilder();
@@ -247,7 +250,7 @@ public class Pipeline {
                 }
             }
 
-            java.nio.file.Files.writeString(outPath, sb.toString());
+            Files.writeString(outPath, sb.toString());
             Utils.log(logger.apply("Typings written to: " + outPath));
         } catch (Exception e) {
             Utils.logError("Error generating .typings file: " + e.getMessage());
@@ -260,6 +263,9 @@ public class Pipeline {
             return "~";
         if (t instanceof com.expresso.ast.TypeVar) {
             return "any";
+        }
+        if (isListType(t)) {
+            return "[" + typeToString(listElementType(t)) + "]";
         }
         return switch (t) {
             case AtomicNode a -> mapAtomicName(a.name());
@@ -287,6 +293,19 @@ public class Pipeline {
             case "Any", "any" -> "any";
             default -> name;
         };
+    }
+
+    private static boolean isListType(TypeNode t) {
+        if (t instanceof TupleNode tuple && tuple.elements().size() == 2) {
+            TypeNode head = tuple.elements().get(0);
+            return head instanceof AtomicNode a && LIST_SENTINEL.equals(a.name());
+        }
+        return false;
+    }
+
+    private static TypeNode listElementType(TypeNode listType) {
+        TupleNode tuple = (TupleNode) listType;
+        return tuple.elements().get(1);
     }
 
     private static Optional<ParseTreeResult> processASTWithVisualization(String content,

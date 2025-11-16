@@ -58,8 +58,39 @@ expr:
         | STRING                                                # String
         | NONE                                                  # None
         | ID                                                    # Variable
-        | '(' expr ')'                                  # Parens
+        // Grouped expressions intentionally reuse pureExpr so typed lambdas outrank casts while
+        // ParensContext still exposes ctx.expr() to the visitors via the labeled element.
+        | '(' expr=pureExpr ')'                                  # Parens
         | LBRACK elements? RBRACK               # Lists;
+
+// Mirrors expr but intentionally omits the Cast alternative so grouped expressions
+// cannot be reduced to a Parens(Cast(...)) node. This forces ANTLR to match typed
+// lambda parameters before it considers a parenthesized cast, which fixes constructs
+// such as `(n:int) -> body`.
+pureExpr:
+
+        <assoc = right> '(' arguments? ')' ARROW expr
+        | <assoc = right> ID (COLON type)? ARROW expr
+        | '-' pureExpr
+        | '!' pureExpr
+        | '^' constructor_call
+        | MATCH pureExpr WITH NEWLINE* match_rule (NEWLINE* PIPE NEWLINE* match_rule)*
+        | pureExpr '(' (expr (',' expr)*)? ')'
+        | <assoc = right> pureExpr op = ('**' | '!**') pureExpr
+        | pureExpr op = ('*' | '/') pureExpr
+        | pureExpr op = ('+' | '-') pureExpr
+        | pureExpr op = ('<' | '<=' | '>' | '>=' | '==' | '!=') pureExpr
+        | pureExpr op = '&&' pureExpr
+        | pureExpr op = '||' pureExpr
+        | <assoc = right> pureExpr QUESTION pureExpr COLON pureExpr
+        | INT
+        | FLOAT
+        | BOOLEAN
+        | STRING
+        | NONE
+        | ID
+        | '(' pureExpr ')'
+        | LBRACK elements? RBRACK;
 
 // ---------------------- Matching Rules ----------------------
 match_rule: pattern guard? ARROW expr;
