@@ -67,6 +67,13 @@ public class AstBuilder extends ExprBaseVisitor<Node> {
         return visit(ctx.expr());
     }
 
+    @Override
+    public Node visitPrintExprValue(ExprParser.PrintExprValueContext ctx) {
+        // Treat inline print calls as plain expressions to avoid null AST nodes
+        // caused by the trailing parenthesis token.
+        return visit(ctx.expr());
+    }
+
     // To discuss: Should we return a special Pass node instead of null?
     // For now, we return null for blank statements.
     @Override
@@ -224,14 +231,14 @@ public class AstBuilder extends ExprBaseVisitor<Node> {
     @Override
     public Lambda visitLambdaParams(ExprParser.LambdaParamsContext ctx) {
         ExprParser.LambdaParamListContext paramsCtx = ctx.getRuleContext(ExprParser.LambdaParamListContext.class, 0);
-        List<String> paramNames = extractParameterNames(paramsCtx);
+        List<Argument> parameters = extractLambdaParameters(paramsCtx);
         ExprParser.ExprContext bodyCtx = ctx.expr();
         if (bodyCtx == null) {
             throw new IllegalStateException("Lambda parameter expression is missing a body");
         }
         Node body = visit(bodyCtx);
 
-        return new Lambda(paramNames, body);
+        return new Lambda(parameters, body);
     }
 
     @Override
@@ -243,13 +250,18 @@ public class AstBuilder extends ExprBaseVisitor<Node> {
 
         var idNode = lambdaCtx.ID();
         String paramName = idNode != null ? idNode.getText() : "_";
+        TypeNode paramType = null;
+        var typeCtx = lambdaCtx.getRuleContext(ExprParser.TypeContext.class, 0);
+        if (typeCtx != null) {
+            paramType = typeBuilder.visit(typeCtx);
+        }
         ExprParser.ExprContext bodyCtx = lambdaCtx.expr();
         if (bodyCtx == null) {
             throw new IllegalStateException("Lambda expression is missing a body");
         }
         Node body = visit(bodyCtx);
 
-        return new Lambda(List.of(paramName), body);
+        return new Lambda(List.of(new Argument(paramName, paramType)), body);
     }
     
     // -----------------------------------------------------------------------------------
@@ -334,22 +346,21 @@ public class AstBuilder extends ExprBaseVisitor<Node> {
                 .collect(Collectors.toList());
     }
 
-    // Extract parameter names from lambdaParamList
-    private List<String> extractParameterNames(ExprParser.LambdaParamListContext ctx) {
+    // Extract lambda parameters (name + optional type) from lambdaParamList
+    private List<Argument> extractLambdaParameters(ExprParser.LambdaParamListContext ctx) {
         if (ctx == null) {
             return Collections.emptyList();
         }
 
         return ctx.lambdaParam().stream()
-                .map(this::extractParameterName)
-                .filter(name -> name != null)
+                .map(paramCtx -> {
+                    var idNode = paramCtx.getToken(ExprParser.ID, 0);
+                    String name = idNode != null ? idNode.getText() : "_";
+                    var typeCtx = paramCtx.getRuleContext(ExprParser.TypeContext.class, 0);
+                    TypeNode type = typeCtx != null ? typeBuilder.visit(typeCtx) : null;
+                    return new Argument(name, type);
+                })
                 .collect(Collectors.toList());
-    }
-
-    // Extract single parameter name from LambdaParamContext
-    private String extractParameterName(ExprParser.LambdaParamContext paramCtx) {
-        var idNode = paramCtx.getToken(ExprParser.ID, 0);
-        return idNode != null ? idNode.getText() : null;
     }
 
     // -----------------------------------------------------------------------------------

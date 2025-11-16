@@ -6,13 +6,17 @@
 package com.expresso.visitors;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.Token;
 
+import com.expresso.ast.Argument;
 import com.expresso.ast.ArrowNode;
 import com.expresso.ast.AtomicNode;
 import com.expresso.ast.BinaryOp;
@@ -40,6 +44,7 @@ import com.expresso.ast.StringNode;
 import com.expresso.ast.TernaryExpression;
 import com.expresso.ast.TupleNode;
 import com.expresso.ast.TypeNode;
+import com.expresso.ast.TypeVar;
 import com.expresso.ast.UnaryOp;
 import com.expresso.ast.Variable;
 import com.expresso.features.Feature;
@@ -65,6 +70,9 @@ public class AstTranspiler {
     // private final Map<String, String> variableTypes = new HashMap<>();
     private final Typer typer;
     private final Env globalEnv;
+    private final Map<String, ConstructorInfo> constructorInfos = new HashMap<>();
+    private final Set<String> userTypes = new HashSet<>();
+    private int patternVarCounter = 0;
 
     // --------------------------------------------------------------
     // Constructor
@@ -114,9 +122,12 @@ public class AstTranspiler {
             case LetStatement(var name, var declaredType, var expr) -> {
                 // Special handling for InstantiatorNode - use Object type
                 String typeName;
+                TypeNode resolvedType = null;
                 if (declaredType != null) {
-                    env.define(name, declaredType);
-                    typeName = typeNodeToJava(declaredType);
+                    TypeNode appliedDeclared = typer != null ? typer.apply(declaredType) : declaredType;
+                    env.define(name, appliedDeclared);
+                    resolvedType = appliedDeclared;
+                    typeName = typeNodeToJava(appliedDeclared);
                 } else if (expr instanceof InstantiatorNode) {
                     typeName = "Object"; // Use Object for data type instances
                     env.define(name, new AtomicNode("Any"));
@@ -124,19 +135,29 @@ public class AstTranspiler {
                     TypeNode type = typer.infer(expr, env);
                     type = typer.apply(type);
                     env.define(name, type);
+                     resolvedType = type;
                     typeName = typeNodeToJava(type);
                 }
 
                 String exprCode = transpile(expr, env);
 
-                if (expr instanceof Lambda && exprCode.contains(name + ".apply(")) {
-                    features.add(Feature.ATOMIC);
-                    String refName = "__" + name + "Ref";
-                    String replacedLambda = exprCode.replace(name + ".apply(", refName + ".get().apply(");
+                FunctionalDescriptor lambdaDescriptor =
+                        resolvedType instanceof ArrowNode arrow ? describeFunctionalInterface(arrow) : null;
 
-                    yield "AtomicReference<" + typeName + "> " + refName + " = new AtomicReference<>();\n"
-                            + refName + ".set(" + replacedLambda + ");\n"
-                            + typeName + " " + name + " = " + refName + ".get();";
+                if (expr instanceof Lambda && exprCode != null) {
+                    String methodName = lambdaDescriptor != null ? lambdaDescriptor.invocationMethod() : "apply";
+                    String invocationToken = name + "." + methodName + "(";
+
+                    if (exprCode.contains(invocationToken)) {
+                        features.add(Feature.ATOMIC);
+                        String refName = "__" + name + "Ref";
+                        String replacedLambda = exprCode.replace(invocationToken,
+                                refName + ".get()." + methodName + "(");
+
+                        yield "AtomicReference<" + typeName + "> " + refName + " = new AtomicReference<>();\n"
+                                + refName + ".set(" + replacedLambda + ");\n"
+                                + typeName + " " + name + " = " + refName + ".get();";
+                    }
                 }
 
                 yield typeName + " " + name + " = " + exprCode + ";";
@@ -268,42 +289,59 @@ public class AstTranspiler {
                     paramNames.add(pname);
                 }
 
+                TypeNode bindingType = env.find(name);
+                if (bindingType != null && typer != null) {
+                    bindingType = typer.apply(bindingType);
+                }
+
+                FunctionalDescriptor funDescriptor = bindingType instanceof ArrowNode arrow
+                        ? describeFunctionalInterface(arrow)
+                        : null;
+
                 String javaFuncType;
-                switch (paramNames.size()) {
-                    case 0 -> {
-                        String ret = returnType != null ? typeNodeToJava(returnType) : "Object";
-                        javaFuncType = "Supplier<" + ret + ">";
-                    }
-                    case 1 -> {
-                        String in = typeNodeToJava(paramTypes.get(0));
-                        String ret = returnType != null ? typeNodeToJava(returnType) : "Object";
-                        javaFuncType = "Function<" + in + ", " + ret + ">";
-                    }
-                    case 2 -> {
-                        String in1 = typeNodeToJava(paramTypes.get(0));
-                        String in2 = typeNodeToJava(paramTypes.get(1));
-                        String ret = returnType != null ? typeNodeToJava(returnType) : "Object";
-                        javaFuncType = "BiFunction<" + in1 + ", " + in2 + ", " + ret + ">";
-                    }
-                    default -> {
-                        String ret = returnType != null ? typeNodeToJava(returnType) : "Object";
-                        javaFuncType = "Function<Object[], " + ret + ">";
+                if (funDescriptor != null) {
+                    javaFuncType = funDescriptor.renderType();
+                } else {
+                    switch (paramNames.size()) {
+                        case 0 -> {
+                            String ret = returnType != null ? typeNodeToJava(returnType) : "Object";
+                            javaFuncType = "Supplier<" + ret + ">";
+                        }
+                        case 1 -> {
+                            String in = typeNodeToJava(paramTypes.get(0));
+                            String ret = returnType != null ? typeNodeToJava(returnType) : "Object";
+                            javaFuncType = "Function<" + in + ", " + ret + ">";
+                        }
+                        case 2 -> {
+                            String in1 = typeNodeToJava(paramTypes.get(0));
+                            String in2 = typeNodeToJava(paramTypes.get(1));
+                            String ret = returnType != null ? typeNodeToJava(returnType) : "Object";
+                            javaFuncType = "BiFunction<" + in1 + ", " + in2 + ", " + ret + ">";
+                        }
+                        default -> {
+                            String ret = returnType != null ? typeNodeToJava(returnType) : "Object";
+                            javaFuncType = "Function<Object[], " + ret + ">";
+                        }
                     }
                 }
 
                 String lambdaParams = formatLambdaParams(paramNames);
                 String bodyCode = transpile(body, localEnv);
 
+                String invocationMethod = funDescriptor != null ? funDescriptor.invocationMethod() : "apply";
+                String invocationToken = name + "." + invocationMethod + "(";
+
                 // Detect recursion: body references the function name followed by '.apply('
                 // (for non 0-param functions)
-                boolean recursive = bodyCode.contains(name + ".apply(");
+                boolean recursive = bodyCode.contains(invocationToken);
 
                 if (recursive) {
                     // Mark atomic feature for import
                     features.add(Feature.ATOMIC);
                     // Replace self calls with reference getter
                     String refName = "__" + name + "Ref";
-                    String replacedBody = bodyCode.replace(name + ".apply(", refName + ".get().apply(");
+                    String replacedBody = bodyCode.replace(invocationToken,
+                            refName + ".get()." + invocationMethod + "(");
                     StringBuilder rec = new StringBuilder();
                     rec.append(javaFuncType)
                             .append(" ")
@@ -351,19 +389,35 @@ public class AstTranspiler {
         List<String> argList = args.stream().map(arg -> transpile(arg, env)).collect(Collectors.toList());
         String joinedArgs = String.join(", ", argList);
 
-        TypeNode funcType = typer.infer(funcNode, env); // Infer the function type
+        if (typer != null) {
+            TypeNode funcType = typer.apply(typer.infer(funcNode, env));
 
-        if (funcType instanceof ArrowNode arrow) {
-            if (arrow.inputType() instanceof TupleNode tuple) {
-                // Create a new environment combining parameters and arguments
-                Env callEnv = new Env(env);
-                for (int i = 0; i < tuple.elements().size(); i++) {
-                    TypeNode t = typer.infer(args.get(i), env); // Infer the argument type
-                    callEnv.define(tuple.elements().get(i).toString(), t); // Bind to parameter name
+            if (funcType instanceof ArrowNode arrow) {
+                FunctionalDescriptor descriptor = describeFunctionalInterface(arrow);
+                String methodName = descriptor.invocationMethod();
+
+                if (descriptor.parameterCount() == 0) {
+                    return funcCode + "." + methodName + "()";
                 }
-            }
 
-            return funcCode + ".apply(" + joinedArgs + ")";
+                String argsCode;
+                if (descriptor.expectsArrayArgument()) {
+                    String contents = joinedArgs.isBlank() ? "" : joinedArgs;
+                    argsCode = "new Object[]{" + contents + "}";
+                } else {
+                    argsCode = joinedArgs;
+                }
+
+                String invocation = funcCode + "." + methodName + "(" + argsCode + ")";
+
+                if (descriptor.returnType() != null
+                        && !"Object".equals(descriptor.returnType())
+                        && ("apply".equals(methodName) || "get".equals(methodName))) {
+                    invocation = "((" + descriptor.returnType() + ")(" + invocation + "))";
+                }
+
+                return invocation;
+            }
         }
 
         return funcCode + "(" + joinedArgs + ")";
@@ -481,6 +535,9 @@ public class AstTranspiler {
         if (typeNode == null) {
             return "Object";
         }
+        if (typer != null) {
+            typeNode = typer.apply(typeNode);
+        }
         if (typeNode instanceof TupleNode) {
             return "Object[]";
         }
@@ -491,24 +548,15 @@ public class AstTranspiler {
                 case "String", "string" -> "String";
                 case "Boolean", "boolean" -> "Boolean";
                 case "Any", "any" -> "Object";
-                case "Void", "void" -> "void";
-                default -> "Object";
+                case "Void", "void" -> "Void";
+                default -> userTypes.contains(atomic.name()) ? atomic.name() : "Object";
             };
         }
+        if (typeNode instanceof TypeVar) {
+            return "Object";
+        }
         if (typeNode instanceof ArrowNode arrow) {
-            String output = typeNodeToJava(arrow.returnType());
-            if (arrow.inputType() instanceof TupleNode tuple) {
-                int paramCount = tuple.elements().size();
-                if (paramCount == 2) {
-                    String input1 = typeNodeToJava(tuple.elements().get(0));
-                    String input2 = typeNodeToJava(tuple.elements().get(1));
-                    return "BiFunction<" + input1 + ", " + input2 + ", " + output + ">";
-                } else if (paramCount > 2) {
-                    return "Function<Object[], " + output + ">";
-                }
-            }
-            String input = typeNodeToJava(arrow.inputType());
-            return "Function<" + input + ", " + output + ">";
+            return describeFunctionalInterface(arrow).renderType();
         }
         return "Object";
     }
@@ -538,26 +586,24 @@ public class AstTranspiler {
         return token.getType() == ExprLexer.LINECOMMENT || token.getType() == ExprLexer.BLOCKCOMMENT;
     }
 
-    private List<String> safeParamNames(List<String> params, Env env) {
-        return params.stream().reduce(
-                new ArrayList<>(), // Accumulator for safe names
-                (acc, p) -> {
-                    String newName = p;
-                    int counter = 0;
-
-                    // Keep incrementing counter until we find a unique name
-                    while (env.has(newName) || acc.contains(newName)) {
-                        counter++;
-                        newName = p + counter;
-                    }
-
-                    acc.add(newName);
-                    return acc;
-                },
-                (acc1, acc2) -> { // Combiner for parallel streams
-                    acc1.addAll(acc2);
-                    return acc1;
-                });
+    private List<String> safeParamNames(List<Argument> params, Env env) {
+        return params.stream().map(arg -> arg.name() != null ? arg.name() : "_p")
+                .reduce(
+                        new ArrayList<>(),
+                        (acc, baseName) -> {
+                            String newName = baseName;
+                            int counter = 0;
+                            while (env.has(newName) || acc.contains(newName)) {
+                                counter++;
+                                newName = baseName + counter;
+                            }
+                            acc.add(newName);
+                            return acc;
+                        },
+                        (acc1, acc2) -> {
+                            acc1.addAll(acc2);
+                            return acc1;
+                        });
     }
 
     // --------------------------------------------------------------
@@ -574,6 +620,8 @@ public class AstTranspiler {
      */
     private String transpileDataDeclaration(String typeName, List<Constructor> constructors) {
         StringBuilder sb = new StringBuilder();
+
+        userTypes.add(typeName);
 
         // Generate sealed interface
         String constructorNames = constructors.stream()
@@ -602,6 +650,8 @@ public class AstTranspiler {
             }
 
             sb.append(" implements ").append(typeName).append(" {}\n");
+
+            constructorInfos.put(constructor.name(), new ConstructorInfo(typeName, List.copyOf(constructor.arguments())));
         }
 
         return sb.toString();
@@ -615,34 +665,27 @@ public class AstTranspiler {
     private String transpileMatchExpression(Node expression, List<MatchRule> rules, Env env) {
         StringBuilder sb = new StringBuilder();
         String exprCode = transpile(expression, env);
+        TypeNode matchedType = typer.apply(typer.infer(expression, env));
 
-        // For now, use simple switch without cast
-        // TODO: Improve type inference to use correct sealed type
         sb.append("switch(").append(exprCode).append(") {\n");
         indentLevel++;
 
         for (MatchRule rule : rules) {
-            sb.append(indent());
-            sb.append("case ");
+            Env ruleEnv = new Env(env);
+            registerPatternVariables(rule.pattern(), matchedType, ruleEnv);
 
-            // Transpile pattern
+            sb.append(indent()).append("case ");
             String patternCode = transpilePattern(rule.pattern());
             sb.append(patternCode);
 
-            // Add guard if present
             if (rule.guard() != null) {
-                sb.append(" when ").append(transpile(rule.guard(), env));
+                sb.append(" when ").append(transpile(rule.guard(), ruleEnv));
             }
 
-            sb.append(" -> ");
-
-            // Transpile expression
-            String resultCode = transpile(rule.expression(), env);
-            sb.append(resultCode);
-            sb.append(";\n");
+            String resultCode = transpile(rule.expression(), ruleEnv);
+            sb.append(" -> ").append(resultCode).append(";\n");
         }
 
-        // Add default case to make switch exhaustive for Object types
         sb.append(indent()).append("default -> throw new IllegalArgumentException(\"Unexpected value\");\n");
 
         indentLevel--;
@@ -657,14 +700,14 @@ public class AstTranspiler {
     private String transpilePattern(Pattern pattern) {
         return switch (pattern) {
             case DataPattern(var constructorName, var params) -> {
-                if (params.isEmpty()) {
-                    // Simple constructor: Zero
-                    yield constructorName + " _";
-                } else {
-                    // Constructor with params: S(n)
-                    // For now, we use a simple variable binding
-                    yield constructorName + " " + constructorName.toLowerCase();
+                if (!constructorInfos.containsKey(constructorName)) {
+                    yield renderVariableName(constructorName);
                 }
+                if (params.isEmpty()) {
+                    yield constructorName + "()";
+                }
+                yield constructorName + "(" + params.stream().map(this::renderPatternComponent)
+                        .collect(Collectors.joining(", ")) + ")";
             }
             case NativePattern(var type, var value) -> {
                 yield switch (type) {
@@ -672,16 +715,163 @@ public class AstTranspiler {
                     case BOOLEAN -> String.valueOf(value);
                     case STRING -> value.toString();
                     case NUMERIC -> String.valueOf(value);
-                    case VARIABLE -> {
-                        String varName = value.toString();
-                        if ("_".equals(varName)) {
-                            yield "_"; // Wildcard pattern
-                        }
-                        yield varName;
-                    }
+                    case VARIABLE -> renderVariableName(value.toString());
                 };
             }
             default -> throw new RuntimeException("Unknown pattern type: " + pattern);
         };
+    }
+
+    private String renderPatternComponent(DataPattern pattern) {
+        if (constructorInfos.containsKey(pattern.constructorName())) {
+            return transpilePattern(pattern);
+        }
+        return renderVariableName(pattern.constructorName());
+    }
+
+    private String renderVariableName(String original) {
+        if ("_".equals(original)) {
+            return "var " + freshPatternName();
+        }
+        return "var " + original;
+    }
+
+    private String freshPatternName() {
+        return "__ignored" + (patternVarCounter++);
+    }
+
+    private void registerPatternVariables(Pattern pattern, TypeNode matchedType, Env env) {
+        if (pattern instanceof DataPattern dp) {
+            registerDataPatternVariables(dp, matchedType, env);
+        } else if (pattern instanceof NativePattern np) {
+            registerNativePatternVariables(np, matchedType, env);
+        }
+    }
+
+    private void registerDataPatternVariables(DataPattern pattern, TypeNode matchedType, Env env) {
+        ConstructorInfo info = constructorInfos.get(pattern.constructorName());
+        if (info == null) {
+            if (!"_".equals(pattern.constructorName())) {
+                env.define(pattern.constructorName(), matchedType != null ? matchedType : new AtomicNode("any"));
+            }
+            return;
+        }
+
+        List<Argument> args = info.arguments();
+        if (pattern.params().size() != args.size()) {
+            throw new RuntimeException("Pattern arity mismatch for constructor '" + pattern.constructorName() + "'");
+        }
+
+        for (int i = 0; i < args.size(); i++) {
+            Argument arg = args.get(i);
+            TypeNode nextType = arg.type() != null ? arg.type() : new AtomicNode("any");
+            registerPatternVariables(pattern.params().get(i), nextType, env);
+        }
+    }
+
+    private void registerNativePatternVariables(NativePattern pattern, TypeNode matchedType, Env env) {
+        if (pattern.type() == NativePattern.PatternType.VARIABLE) {
+            String name = pattern.value().toString();
+            if (!"_".equals(name)) {
+                env.define(name, matchedType != null ? matchedType : new AtomicNode("any"));
+            }
+        }
+    }
+
+    private FunctionalDescriptor describeFunctionalInterface(ArrowNode arrow) {
+        TypeNode normalizedInput = typer != null ? typer.apply(arrow.inputType()) : arrow.inputType();
+        TypeNode normalizedReturn = typer != null ? typer.apply(arrow.returnType()) : arrow.returnType();
+
+        List<TypeNode> params = extractParamTypes(normalizedInput);
+        List<String> paramJava = params.stream().map(this::typeNodeToJava).collect(Collectors.toList());
+        String returnJava = typeNodeToJava(normalizedReturn);
+
+        if (params.isEmpty()) {
+            if (isVoidType(normalizedReturn)) {
+                return new FunctionalDescriptor("Runnable", List.of(), "run", 0, false, null);
+            }
+            return new FunctionalDescriptor("Supplier", List.of(returnJava), "get", 0, false, returnJava);
+        }
+
+        if (params.size() == 1) {
+            String in = paramJava.get(0);
+            if (isVoidType(normalizedReturn)) {
+                return new FunctionalDescriptor("Consumer", List.of(in), "accept", 1, false, null);
+            }
+            if (isBooleanType(normalizedReturn)) {
+                return new FunctionalDescriptor("Predicate", List.of(in), "test", 1, false, null);
+            }
+            if (areSameTypes(params.get(0), normalizedReturn)) {
+                return new FunctionalDescriptor("UnaryOperator", List.of(in), "apply", 1, false, in);
+            }
+            return new FunctionalDescriptor("Function", List.of(in, returnJava), "apply", 1, false, returnJava);
+        }
+
+        if (params.size() == 2) {
+            String in1 = paramJava.get(0);
+            String in2 = paramJava.get(1);
+            if (isVoidType(normalizedReturn)) {
+                return new FunctionalDescriptor("BiConsumer", List.of(in1, in2), "accept", 2, false, null);
+            }
+            if (isBooleanType(normalizedReturn)) {
+                return new FunctionalDescriptor("BiPredicate", List.of(in1, in2), "test", 2, false, null);
+            }
+            if (areSameTypes(params.get(0), params.get(1)) && areSameTypes(params.get(0), normalizedReturn)) {
+                return new FunctionalDescriptor("BinaryOperator", List.of(in1), "apply", 2, false, in1);
+            }
+            return new FunctionalDescriptor("BiFunction", List.of(in1, in2, returnJava), "apply", 2, false, returnJava);
+        }
+
+        return new FunctionalDescriptor("Function", List.of("Object[]", returnJava), "apply", params.size(), true,
+                returnJava);
+    }
+
+    private List<TypeNode> extractParamTypes(TypeNode inputType) {
+        TypeNode applied = typer != null ? typer.apply(inputType) : inputType;
+        if (applied instanceof TupleNode tuple) {
+            return tuple.elements();
+        }
+        if (applied instanceof AtomicNode atomic && "void".equalsIgnoreCase(atomic.name())) {
+            return List.of();
+        }
+        return List.of(applied);
+    }
+
+    private boolean isVoidType(TypeNode type) {
+        if (type == null) {
+            return false;
+        }
+        TypeNode applied = typer != null ? typer.apply(type) : type;
+        return applied instanceof AtomicNode atomic && "void".equalsIgnoreCase(atomic.name());
+    }
+
+    private boolean isBooleanType(TypeNode type) {
+        if (type == null) {
+            return false;
+        }
+        TypeNode applied = typer != null ? typer.apply(type) : type;
+        return applied instanceof AtomicNode atomic && "boolean".equalsIgnoreCase(atomic.name());
+    }
+
+    private boolean areSameTypes(TypeNode left, TypeNode right) {
+        if (left == null || right == null) {
+            return false;
+        }
+        TypeNode normalizedLeft = typer != null ? typer.apply(left) : left;
+        TypeNode normalizedRight = typer != null ? typer.apply(right) : right;
+        return normalizedLeft.equals(normalizedRight);
+    }
+
+    private record FunctionalDescriptor(String interfaceName, List<String> typeArguments,
+            String invocationMethod, int parameterCount, boolean expectsArrayArgument, String returnType) {
+        String renderType() {
+            if (typeArguments == null || typeArguments.isEmpty()) {
+                return interfaceName;
+            }
+            return interfaceName + "<" + String.join(", ", typeArguments) + ">";
+        }
+    }
+
+    private record ConstructorInfo(String typeName, List<Argument> arguments) {
     }
 }
