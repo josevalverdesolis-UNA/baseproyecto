@@ -1,0 +1,40 @@
+
+// HelloWorld2.expresso
+
+/*
+  Boolean Logic
+  @author hooNous
+  @since Oct 6th, 2025
+*/
+
+let isZero = x -> x ? 1 : 0
+let TRUE  = 1
+let FALSE = 0
+
+let isTrue = x -> isZero(x) ? TRUE : FALSE
+
+let NOT = x -> x ? 0 : 1
+
+let OR =  (x, y) -> isTrue(x) ? TRUE : isTrue(y)
+
+let AND = (x, y) -> isTrue(x) ? isTrue(y) : FALSE
+
+let XOR = (x, y) -> AND(OR(x, y), NOT(AND(x, y)))
+
+print(XOR(TRUE, TRUE))   // Expected 0
+print(XOR(TRUE, FALSE))  // Expected 1
+print(XOR(FALSE, TRUE))  // Expected 1
+print(XOR(FALSE, FALSE)) // Expected 0
+
+/*
+  With the idea of respect this condition:
+  Hay un operador ternario ( ?: ) con precedencia y asociatividad como en Java . Una
+expresión como ec ? ex : ey asume para esta versión que ec se transpila como
+ec !=0 . Asumiendo para eso que ec es de tipo entero. Por ejemplo:
+(10 + 1) ? 666 : 777 se transpila en (10 + 1) != 0 ? 666 : 777
+
+  We change the test in order to make it works as desire we change this let isZero = x -> x ? 0 : 1 to this let isZero = x -> x ? 1 : 0
+*/
+
+
+

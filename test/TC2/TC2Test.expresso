@@ -1,0 +1,17 @@
+// TC2 - Declaraciones de tipos explícitos y casting
+print("=== TC2: Type Declarations & Castings ===")
+
+let a:int = 5
+let b:float = 2.5
+let c:string = "Result: "
+
+// Casting implícito y explícito
+let result = (a:float + b):float
+print(c + result)
+
+let castTest = x:int -> (x:float + 0.75)
+print("castTest(10) = " + castTest(10))
+
+// Casting de booleano a string concatenación
+let flag:bool = true
+print("Flag value is: " + flag)
