@@ -1,0 +1,254 @@
+// Project: Expresso
+// Subject: EIF400 - Programming Paradigms - II-2025
+// Group: 03 6PM
+// Authors: Rodrigo C. , Eduardo F. , Diego S., Jose Luis V.
+
+plugins{
+    id 'java'
+    id 'application'
+    id 'antlr'
+}
+
+group = 'com.expresso'
+version = '1.0.0'
+
+// Java Version - Adjust if needed
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(23)
+    }
+}
+
+application {
+    //mainClass = 'com.expresso.test.TestAstEval'
+    mainClass = 'com.expresso.Main'
+    mainModule = 'com.expresso'
+}
+
+repositories {
+    mavenCentral()
+}
+
+// Dependencies
+dependencies{
+    // PicoCLI
+    implementation 'info.picocli:picocli:4.7.7'
+    
+    // ANTLR4
+    antlr 'org.antlr:antlr4:4.13.1'
+    implementation 'org.antlr:antlr4-runtime:4.13.1'
+}
+
+generateGrammarSource {
+    maxHeapSize = "64m"
+    arguments += ["-visitor", "-long-messages", "-package", "com.expresso.grammar"]
+}
+
+compileJava.dependsOn generateGrammarSource
+
+sourceSets {
+    main {
+        java {
+            srcDirs += ["build/generated-src/antlr/main"]
+        }
+    }
+}
+
+test{
+
+}
+
+// Jar Configuration
+jar{
+    // Exclude duplicate files
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE 
+
+    manifest {
+        attributes(
+            'Main-Class': 'com.expresso.Main',
+            'Implementation-Title': 'Expresso Transpiler',
+            'Implementation-Version': version
+        )
+    }
+
+    // Include all runtime dependencies
+    from{
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+
+    // Configure the archive file name
+    archiveFileName = 'expressor.jar'
+
+    // Exclude unnecessary files
+    exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA'
+}
+
+// Create .exe with jpackage
+task createExe{
+    dependsOn jar
+    
+    doFirst{
+        delete "${buildDir}/exe"
+        println "Deleted old executable files."
+    }
+
+    doLast{
+        // Get JDK
+        def javaHome = System.getProperty('java.home')
+        def jpackagePath = "${javaHome}/bin/jpackage"
+
+        // Adjust for Windows 
+        if(System.getProperty('os.name').toLowerCase().contains('windows') && !jpackagePath.endsWith('.exe')){
+            jpackagePath += '.exe'
+        }
+
+        // Build the command for jpackage
+        def command = [
+            jpackagePath,
+            '--type', 'app-image',
+            '--input', "${buildDir}/libs",
+            '--dest', "${buildDir}/exe", 
+            '--name', 'expressor',
+            '--main-class', 'com.expresso.Main',
+            '--main-jar', 'expressor.jar',
+            '--app-version', '1.0.0',
+            '--win-console'
+        ]
+
+        println "Running command: ${command.join(' ')}"
+
+        def process = command.execute()
+        process.waitFor()
+
+        // Check for success
+        if(process.exitValue() == 0){
+            println "Executable created successfully."
+            println "Location: ${buildDir}/exe/expressor"
+            println "Running command: ${buildDir}\\exe\\expressor\\expressor.exe"
+        }else{
+            println "Error creating executable."
+            println process.errorStream.text
+            throw new GradleException("JPackage failed.")
+        }
+    }
+}
+
+// Build will execute createExe and show the final message
+build {
+    dependsOn createExe
+    
+    doLast {
+        println "#------------------------------------------------#"
+        println "# Expresso build complete!                       #"
+        println "#------------------------------------------------#"
+        println "# .jar: ${jar.archiveFile.get().asFile} "
+        println "# .exe: ${buildDir}\\exe\\expressor\\expressor.exe"
+        println "#------------------------------------------------#"
+        println "# How to use it                                  #"
+        println "# 1) Add path: ${file("${buildDir}/exe/expressor").absolutePath}"
+        println "# 2) Run:                                        #"
+        println "#     * expressor help                           #"
+        println "#     * expressor transpile HelloWorld.expresso  #"
+        println "#     * expressor build HelloWorld.expresso      #"
+        println "#     * expressor typer HelloWorld.expresso      #"
+        println "#     * expressor run HelloWorld.expresso        #"
+        println "#------------------------------------------------#"
+        println "# Also can be add to the command line            #"
+        println "#     * -- output <output file>                  #"
+        println "#          * This is to specify the output file  #"
+        println "#     * -- verbose                               #"
+        println "#          * This is to enable verbose output    #"
+        println "#     * -- showTree                              #"
+        println "#          * This is to print the custom ast tree#"
+        println "#     * -- showTrees                             #"
+        println "#          * This is to print the custom and the #"
+        println "#          * ANTLR ast tree                      #"
+        println "#------------------------------------------------#"
+    }
+}
+
+// Commands
+tasks.register("runTranspile", JavaExec){
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.expresso.Main'
+    args = ['transpile', 'test.expresso', '--verbose']
+    description = 'Runs the transpile command'
+}
+
+tasks.register('runBuild', JavaExec) {
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.expresso.Main'
+    args = ['build', 'test.expresso', '--verbose']
+    description = 'Runs the build command'
+}
+
+tasks.register("runRun", JavaExec){
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.expresso.Main'
+    args = ['run', 'test.expresso', '--verbose']
+    description = 'Runs the run command'
+}
+
+// Test the .exe
+task testExecutable(type: Exec){
+    dependsOn(createExe)
+
+    if (System.getProperty('os.name').toLowerCase().contains('windows')) {
+        executable = "${buildDir}\\exe\\expressor\\expressor.exe"
+    } else {
+        executable = "${buildDir}/exe/expressor/expressor"
+    }
+    
+    args = ['--help']
+    
+    doFirst {
+        println "Testing the generated executable"
+    }
+}
+
+// This task will simulate adding the executable to the PATH and running it.
+task addExeToPath(type: Exec) {
+    dependsOn createExe
+    // Define the directory where expressor.exe is located
+    def expressorDir = file("${buildDir}/exe/expressor").absolutePath
+    def expressorExe = file("${expressorDir}/expressor.exe") // For Windows
+    def expressorLinux = file("${expressorDir}/expressor") // For Linux/macOS
+    // Validate if the executable exists before trying to run it
+    doFirst {
+        if (System.getProperty('os.name').toLowerCase().contains('windows')) {
+            if (!expressorExe.exists()) {
+                throw new GradleException("Expressor executable not found at ${expressorExe}")
+            }
+            println "Using expressor from: ${expressorExe}"
+            executable = expressorExe.absolutePath
+        } else {
+            if (!expressorLinux.exists()) {
+                throw new GradleException("Expressor executable not found at ${expressorLinux}")
+            }
+            println "Using expressor from: ${expressorLinux}"
+            executable = expressorLinux.absolutePath
+        }
+    }
+    // Temporarily add the executable's directory to the PATH environment variable for this task
+    environment "PATH", "${expressorDir}${File.pathSeparator}${System.getenv('PATH')}"
+    // Specify the command and arguments to run using the modified PATH
+    // This will execute 'expressor --help' as if 'expressor' were directly in PATH
+    args = ['--help']
+    // Allows the process to complete even if the return code is different from 0,
+    // without breaking the build. Useful for commands like '--help' which might exit non-zero
+    // in some scenarios (though unlikely for --help).
+    ignoreExitValue = true
+    doLast {
+        println "The 'expressor' executable was successfully invoked via the simulated PATH."
+    }
+}
+
+// Clean ANTLR generated files
+task cleanGrammar {
+    doLast {
+        delete "build/generated-src/antlr"
+        println "ANTLR generated files cleaned."
+    }
+}
+
+clean.dependsOn cleanGrammar
