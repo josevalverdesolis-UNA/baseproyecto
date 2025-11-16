@@ -67,6 +67,13 @@ public class AstBuilder extends ExprBaseVisitor<Node> {
         return visit(ctx.expr());
     }
 
+    @Override
+    public Node visitPrintExprValue(ExprParser.PrintExprValueContext ctx) {
+        // Treat inline print calls as plain expressions to avoid null AST nodes
+        // caused by the trailing parenthesis token.
+        return visit(ctx.expr());
+    }
+
     // To discuss: Should we return a special Pass node instead of null?
     // For now, we return null for blank statements.
     @Override

@@ -41,6 +41,7 @@ import com.expresso.ast.TernaryExpression;
 import com.expresso.ast.TupleNode;
 import com.expresso.ast.TypeNode;
 import com.expresso.ast.TypeVar;
+import com.expresso.ast.UnaryOp;
 import com.expresso.ast.Variable;
 
 // Typer class for type inference
@@ -359,6 +360,7 @@ public class Typer {
                         }
                         yield new AtomicNode("boolean");
                     }
+
                     yield new AtomicNode("boolean");
                 }
 
@@ -449,6 +451,40 @@ public class Typer {
                 yield apply(trueType);
             }
 
+            // Unary operations (!, -)
+            case UnaryOp(var operator, var expr) -> {
+                return switch (operator) {
+                    case "-" -> {
+                        TypeNode operandType = infer(expr, env);
+                        TypeNode appliedOperand = apply(operandType);
+
+                        if (!isNumericCandidate(appliedOperand)) {
+                            throw new RuntimeException(
+                                    "Unary '-' expects numeric operand, got: " + typeToSurface(appliedOperand));
+                        }
+
+                        if (isAtomic(appliedOperand, "float")) {
+                            coerceNumericOperand(operandType, "float");
+                            yield new AtomicNode("float");
+                        }
+
+                        if (isAtomic(appliedOperand, "int")) {
+                            coerceNumericOperand(operandType, "int");
+                            yield new AtomicNode("int");
+                        }
+
+                        // Propagate symbolic numeric types (e.g., type vars) so other
+                        // constraints can specialize them later on.
+                        yield appliedOperand;
+                    }
+                    case "!" -> {
+                        TypeNode operandType = infer(expr, env);
+                        unify(operandType, new AtomicNode("boolean"));
+                        yield new AtomicNode("boolean");
+                    }
+                    default -> throw new RuntimeException("Unsupported unary operator: " + operator);
+                };
+            }
             // Match expression
             case MatchExpression(var matchExpr, var rules) -> {
                 TypeNode matchedType = infer(matchExpr, env);
@@ -692,6 +728,40 @@ public class Typer {
         return (t instanceof AtomicNode a) && (a.name().equals("Any") || a.name().equals("any"));
     }
   
+    private void coerceNumericOperand(TypeNode operand, String targetAtomic) {
+        TypeNode applied = apply(operand);
+        if (applied instanceof TypeVar || isAny(applied)) {
+            unify(operand, new AtomicNode(targetAtomic));
+            return;
+        }
+        if (applied instanceof AtomicNode atomic) {
+            String name = atomic.name();
+            if (name.equals(targetAtomic)) {
+                return;
+            }
+            if ("float".equals(targetAtomic) && "int".equals(name)) {
+                return;
+            }
+        }
+        throw new RuntimeException(
+                "Type mismatch: expected numeric operand of type " + targetAtomic + ", got "
+                        + typeToSurface(applied));
+    }
+
+    private boolean isNumericCandidate(TypeNode type) {
+        TypeNode applied = apply(type);
+        if (applied instanceof TypeVar) {
+            return true;
+        }
+        if (isAny(applied)) {
+            return true;
+        }
+        if (applied instanceof AtomicNode atomic) {
+            return atomic.name().equals("int") || atomic.name().equals("float");
+        }
+        return false;
+    }
+
     private void coerceNumericOperand(TypeNode operand, String targetAtomic) {
         TypeNode applied = apply(operand);
         if (applied instanceof TypeVar || isAny(applied)) {
