@@ -91,7 +91,7 @@ native_pattern:
 params: expr (COMMA expr)*;
 
 //Constructor call
-constructor_call: ID '(' params ')' | ID;
+constructor_call: ID '(' params? ')' | ID;
 
 // Types
 atomic:
@@ -136,8 +136,11 @@ NONE: 'none';
 ID: [a-zA-Z_][a-zA-Z0-9_]*;
 
 // Types
-FLOAT: [0-9]+ '.' [0-9]* | '.' [0-9]+;
-INT: [0-9]+;
+FLOAT: DIGITS '.' DIGITS? EXPONENT? | '.' DIGITS EXPONENT? | DIGITS EXPONENT;
+INT: DIGITS;
+fragment DIGIT: [0-9];
+fragment DIGITS: DIGIT+;
+fragment EXPONENT: [eE][+\-]? DIGITS;
 STRING: '"' (~["\\\r\n] | '\\' .)* '"';
 
 // Symbols

@@ -13,6 +13,10 @@ public record Argument(String name, TypeNode type) {
     
     @Override
     public String toString() {
+        if (type == null) {
+            return name != null ? name : "";
+        }
+
         if (name != null && !name.isEmpty()) {
             return name + ":" + type;
         }
