@@ -34,8 +34,8 @@ fun length(a:list) = match a with
 	
 	
 fun copy(a:list) = match a with
-    Nil -> a 
-	Cons(f, r) -> ^Cons(f, copy(r))
+    Nil -> a
+    | Cons(f, r) -> ^Cons(f, copy(r))
 	
 fun append(a:list, b:list) = match a with
       Nil -> b
