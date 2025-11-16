@@ -37,6 +37,7 @@ elements: expr (COMMA expr)*;
 // Expresion with precedens and unary '-'
 expr:
         // Lambdas first (highest precedence, right-associative)
+        // They allow typed and untyped parameters and need to bind before casts.
         <assoc = right> '(' arguments? ')' ARROW expr                 # LambdaParams
         | <assoc = right> ID (COLON type)? ARROW expr                 # Lambda
 
@@ -189,5 +190,5 @@ BLOCKCOMMENT: '/*' .*? '*/' -> channel(HIDDEN);
 // The real meaning is that *? makes it non-greedy. So what it means, well it means that it will
 // stop in the first */.
 
-// [CHANGELOG] Archivos modificados en esta iteración:
+// [CHANGELOG] Archivos modificados en esta iteraciÃ³n:
 // - src/main/antlr/com/expresso/grammar/Expr.g4
