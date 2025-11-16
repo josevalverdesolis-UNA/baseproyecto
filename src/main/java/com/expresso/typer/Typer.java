@@ -359,7 +359,6 @@ public class Typer {
                         }
                         yield new AtomicNode("boolean");
                     }
-
                     yield new AtomicNode("boolean");
                 }
 
@@ -692,7 +691,7 @@ public class Typer {
     private boolean isAny(TypeNode t) {
         return (t instanceof AtomicNode a) && (a.name().equals("Any") || a.name().equals("any"));
     }
-
+  
     private void coerceNumericOperand(TypeNode operand, String targetAtomic) {
         TypeNode applied = apply(operand);
         if (applied instanceof TypeVar || isAny(applied)) {
