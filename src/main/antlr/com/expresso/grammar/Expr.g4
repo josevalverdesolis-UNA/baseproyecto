@@ -31,31 +31,33 @@ constructor: ID ('(' arguments ')')?;
 arguments: argument (COMMA argument)*;
 argument: ID (COLON type)?;
 
+// ---- Lambda parameter rules ----
+lambdaParams: '(' lambdaParamList ')' ARROW expr;
+lambdaParamList: lambdaParam (COMMA lambdaParam)*;
+lambdaParam: ID (COLON type)?;
+lambdaSimple: ID (COLON type)? ARROW expr;
+
 // Elements of a Lists
 elements: expr (COMMA expr)*;
 
 // Expresion with precedens and unary '-'
 expr:
-        // Lambdas first (highest precedence, right-associative)
-        <assoc = right> '(' arguments? ')' ARROW expr                 # LambdaParams
-        | <assoc = right> ID (COLON type)? ARROW expr                 # Lambda
-
-        // Explicit cast: expr : type
+        <assoc=right> lambdaParams                                   # LambdaExprParamsExpr
+        | <assoc=right> lambdaSimple                                 # Lambda
         | expr COLON type                                            # Cast
         | '-' expr                                                   # UnaryMinus
         | '!' expr                                                   # LogicalNot
         | '^' constructor_call                                       # Instantiator
-        | MATCH expr WITH NEWLINE* match_rule
-            (NEWLINE* PIPE NEWLINE* match_rule)*                     # Match
+        | MATCH expr WITH NEWLINE* match_rule (NEWLINE* PIPE NEWLINE* match_rule)* # Match
         | expr '(' (expr (COMMA expr)*)? ')'                         # FuncCall
         | PRINT '(' expr ')'                                         # PrintExprValue
-        | <assoc = right> expr op = ('**' | '!**') expr              # PowSqrt
-        | expr op = ('*' | '/') expr                                 # MulDiv
-        | expr op = ('+' | '-') expr                                 # AddSub
-        | expr op = ('<' | '<=' | '>' | '>=' | '==' | '!=') expr     # Relational
-        | expr op = '&&' expr                                        # LogicalAnd
-        | expr op = '||' expr                                        # LogicalOr
-        | <assoc = right> expr QUESTION expr COLON expr              # Ternary
+        | <assoc=right> expr op=('**' | '!**') expr                 # PowSqrt
+        | expr op=('*' | '/') expr                                  # MulDiv
+        | expr op=('+' | '-') expr                                  # AddSub
+        | expr op=('<'|'<='|'>'|'>='|'=='|'!=') expr                # Relational
+        | expr op='&&' expr                                         # LogicalAnd
+        | expr op='||' expr                                         # LogicalOr
+        | <assoc=right> expr QUESTION expr COLON expr               # Ternary
         | INT                                                        # Num
         | FLOAT                                                      # Num
         | BOOLEAN                                                    # Bool
@@ -63,32 +65,7 @@ expr:
         | NONE                                                       # None
         | LBRACK elements? RBRACK                                    # Lists
         | ID                                                         # Variable
-        | '(' inner=pureExpr ')'                                     # Parens
-        ;
-
-pureExpr:
-        <assoc = right> '(' arguments? ')' ARROW expr
-        | <assoc = right> ID (COLON type)? ARROW expr
-        | '-' pureExpr
-        | '!' pureExpr
-        | '^' constructor_call
-        | MATCH pureExpr WITH NEWLINE* match_rule (NEWLINE* PIPE NEWLINE* match_rule)*
-        | pureExpr '(' (expr (COMMA expr)*)? ')'
-        | <assoc = right> pureExpr op = ('**' | '!**') pureExpr
-        | pureExpr op = ('*' | '/') pureExpr
-        | pureExpr op = ('+' | '-') pureExpr
-        | pureExpr op = ('<' | '<=' | '>' | '>=' | '==' | '!=') pureExpr
-        | pureExpr op = '&&' pureExpr
-        | pureExpr op = '||' pureExpr
-        | <assoc = right> pureExpr QUESTION pureExpr COLON pureExpr
-        | INT
-        | FLOAT
-        | BOOLEAN
-        | STRING
-        | NONE
-        | ID
-        | '(' pureExpr ')'
-        | LBRACK elements? RBRACK
+        | '(' expr ')'                                               # Parens
         ;
 
 // ---------------------- Matching Rules ----------------------

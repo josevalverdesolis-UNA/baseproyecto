@@ -182,8 +182,9 @@ public class AstBuilder extends ExprBaseVisitor<Node> {
 
     @Override
     public Node visitParens(ExprParser.ParensContext ctx) {
-        return visit(ctx.inner); // Parentheses disappear in AST (use pureExpr child)
+    return visit(ctx.expr());  // paréntesis desaparecen
     }
+
 
     @Override
     public ListNode visitLists(ExprParser.ListsContext ctx) {
