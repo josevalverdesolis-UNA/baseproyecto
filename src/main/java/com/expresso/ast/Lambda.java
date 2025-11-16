@@ -9,9 +9,10 @@ import java.util.List;
 
 /*
  * Lambda was changed from Lambda(String parameter, Node body) to
- * Lambda(List<String> parameters, Node body) to support multiple parameters.
+ * Lambda(List<Argument> parameters, Node body) to support multiple parameters and
+ * optional type annotations per parameter.
  */
-public record Lambda(List<String> parameters, Node body) implements Node {
+public record Lambda(List<Argument> parameters, Node body) implements Node {
     // --------------------------------------------------------------
     // Getters
     // --------------------------------------------------------------
@@ -32,9 +33,21 @@ public record Lambda(List<String> parameters, Node body) implements Node {
     public String toString() {
         String paramList = switch (parameters.size()) {
             case 0 -> "()";
-            case 1 -> parameters.get(0);
-            default -> "(" + String.join(", ", parameters) + ")";
+            case 1 -> formatParameter(parameters.get(0));
+            default -> parameters.stream()
+                    .map(this::formatParameter)
+                    .reduce((a, b) -> a + ", " + b)
+                    .map(vals -> "(" + vals + ")")
+                    .orElse("()");
         };
         return paramList + " -> " + body;
+    }
+
+    private String formatParameter(Argument argument) {
+        String name = argument.name() != null ? argument.name() : "_";
+        if (argument.type() == null) {
+            return name;
+        }
+        return name + ":" + argument.type();
     }
 }

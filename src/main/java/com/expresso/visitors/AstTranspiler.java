@@ -6,13 +6,16 @@
 package com.expresso.visitors;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.Token;
 
+import com.expresso.ast.Argument;
 import com.expresso.ast.ArrowNode;
 import com.expresso.ast.AtomicNode;
 import com.expresso.ast.BinaryOp;
@@ -65,6 +68,8 @@ public class AstTranspiler {
     // private final Map<String, String> variableTypes = new HashMap<>();
     private final Typer typer;
     private final Env globalEnv;
+    private final Map<String, ConstructorInfo> constructorInfos = new HashMap<>();
+    private int patternVarCounter = 0;
 
     // --------------------------------------------------------------
     // Constructor
@@ -538,26 +543,24 @@ public class AstTranspiler {
         return token.getType() == ExprLexer.LINECOMMENT || token.getType() == ExprLexer.BLOCKCOMMENT;
     }
 
-    private List<String> safeParamNames(List<String> params, Env env) {
-        return params.stream().reduce(
-                new ArrayList<>(), // Accumulator for safe names
-                (acc, p) -> {
-                    String newName = p;
-                    int counter = 0;
-
-                    // Keep incrementing counter until we find a unique name
-                    while (env.has(newName) || acc.contains(newName)) {
-                        counter++;
-                        newName = p + counter;
-                    }
-
-                    acc.add(newName);
-                    return acc;
-                },
-                (acc1, acc2) -> { // Combiner for parallel streams
-                    acc1.addAll(acc2);
-                    return acc1;
-                });
+    private List<String> safeParamNames(List<Argument> params, Env env) {
+        return params.stream().map(arg -> arg.name() != null ? arg.name() : "_p")
+                .reduce(
+                        new ArrayList<>(),
+                        (acc, baseName) -> {
+                            String newName = baseName;
+                            int counter = 0;
+                            while (env.has(newName) || acc.contains(newName)) {
+                                counter++;
+                                newName = baseName + counter;
+                            }
+                            acc.add(newName);
+                            return acc;
+                        },
+                        (acc1, acc2) -> {
+                            acc1.addAll(acc2);
+                            return acc1;
+                        });
     }
 
     // --------------------------------------------------------------
@@ -602,6 +605,8 @@ public class AstTranspiler {
             }
 
             sb.append(" implements ").append(typeName).append(" {}\n");
+
+            constructorInfos.put(constructor.name(), new ConstructorInfo(typeName, List.copyOf(constructor.arguments())));
         }
 
         return sb.toString();
@@ -615,34 +620,27 @@ public class AstTranspiler {
     private String transpileMatchExpression(Node expression, List<MatchRule> rules, Env env) {
         StringBuilder sb = new StringBuilder();
         String exprCode = transpile(expression, env);
+        TypeNode matchedType = typer.apply(typer.infer(expression, env));
 
-        // For now, use simple switch without cast
-        // TODO: Improve type inference to use correct sealed type
         sb.append("switch(").append(exprCode).append(") {\n");
         indentLevel++;
 
         for (MatchRule rule : rules) {
-            sb.append(indent());
-            sb.append("case ");
+            Env ruleEnv = new Env(env);
+            registerPatternVariables(rule.pattern(), matchedType, ruleEnv);
 
-            // Transpile pattern
+            sb.append(indent()).append("case ");
             String patternCode = transpilePattern(rule.pattern());
             sb.append(patternCode);
 
-            // Add guard if present
             if (rule.guard() != null) {
-                sb.append(" when ").append(transpile(rule.guard(), env));
+                sb.append(" when ").append(transpile(rule.guard(), ruleEnv));
             }
 
-            sb.append(" -> ");
-
-            // Transpile expression
-            String resultCode = transpile(rule.expression(), env);
-            sb.append(resultCode);
-            sb.append(";\n");
+            String resultCode = transpile(rule.expression(), ruleEnv);
+            sb.append(" -> ").append(resultCode).append(";\n");
         }
 
-        // Add default case to make switch exhaustive for Object types
         sb.append(indent()).append("default -> throw new IllegalArgumentException(\"Unexpected value\");\n");
 
         indentLevel--;
@@ -657,14 +655,14 @@ public class AstTranspiler {
     private String transpilePattern(Pattern pattern) {
         return switch (pattern) {
             case DataPattern(var constructorName, var params) -> {
-                if (params.isEmpty()) {
-                    // Simple constructor: Zero
-                    yield constructorName + " _";
-                } else {
-                    // Constructor with params: S(n)
-                    // For now, we use a simple variable binding
-                    yield constructorName + " " + constructorName.toLowerCase();
+                if (!constructorInfos.containsKey(constructorName)) {
+                    yield renderVariableName(constructorName);
                 }
+                if (params.isEmpty()) {
+                    yield constructorName + "()";
+                }
+                yield constructorName + "(" + params.stream().map(this::renderPatternComponent)
+                        .collect(Collectors.joining(", ")) + ")";
             }
             case NativePattern(var type, var value) -> {
                 yield switch (type) {
@@ -672,16 +670,69 @@ public class AstTranspiler {
                     case BOOLEAN -> String.valueOf(value);
                     case STRING -> value.toString();
                     case NUMERIC -> String.valueOf(value);
-                    case VARIABLE -> {
-                        String varName = value.toString();
-                        if ("_".equals(varName)) {
-                            yield "_"; // Wildcard pattern
-                        }
-                        yield varName;
-                    }
+                    case VARIABLE -> renderVariableName(value.toString());
                 };
             }
             default -> throw new RuntimeException("Unknown pattern type: " + pattern);
         };
+    }
+
+    private String renderPatternComponent(DataPattern pattern) {
+        if (constructorInfos.containsKey(pattern.constructorName())) {
+            return transpilePattern(pattern);
+        }
+        return renderVariableName(pattern.constructorName());
+    }
+
+    private String renderVariableName(String original) {
+        if ("_".equals(original)) {
+            return "var " + freshPatternName();
+        }
+        return "var " + original;
+    }
+
+    private String freshPatternName() {
+        return "__ignored" + (patternVarCounter++);
+    }
+
+    private void registerPatternVariables(Pattern pattern, TypeNode matchedType, Env env) {
+        if (pattern instanceof DataPattern dp) {
+            registerDataPatternVariables(dp, matchedType, env);
+        } else if (pattern instanceof NativePattern np) {
+            registerNativePatternVariables(np, matchedType, env);
+        }
+    }
+
+    private void registerDataPatternVariables(DataPattern pattern, TypeNode matchedType, Env env) {
+        ConstructorInfo info = constructorInfos.get(pattern.constructorName());
+        if (info == null) {
+            if (!"_".equals(pattern.constructorName())) {
+                env.define(pattern.constructorName(), matchedType != null ? matchedType : new AtomicNode("any"));
+            }
+            return;
+        }
+
+        List<Argument> args = info.arguments();
+        if (pattern.params().size() != args.size()) {
+            throw new RuntimeException("Pattern arity mismatch for constructor '" + pattern.constructorName() + "'");
+        }
+
+        for (int i = 0; i < args.size(); i++) {
+            Argument arg = args.get(i);
+            TypeNode nextType = arg.type() != null ? arg.type() : new AtomicNode("any");
+            registerPatternVariables(pattern.params().get(i), nextType, env);
+        }
+    }
+
+    private void registerNativePatternVariables(NativePattern pattern, TypeNode matchedType, Env env) {
+        if (pattern.type() == NativePattern.PatternType.VARIABLE) {
+            String name = pattern.value().toString();
+            if (!"_".equals(name)) {
+                env.define(name, matchedType != null ? matchedType : new AtomicNode("any"));
+            }
+        }
+    }
+
+    private record ConstructorInfo(String typeName, List<Argument> arguments) {
     }
 }
