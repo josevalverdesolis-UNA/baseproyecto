@@ -21,7 +21,8 @@ public class HelperLibrary {
                         "public static void print(Object arg){ System.out.println(arg); }",
 
                         Feature.POW,
-                        "public static int pow(int x, int e){ return (int)Math.pow(x, e); }");
+                        "public static int pow(int x, int e){ return (int)Math.pow(x, e); }\n"
+                                        + "public static double pow(double x, double e){ return Math.pow(x, e); }");
 
         private static final Map<Feature, String> IMPORTS = Map.of(
                         Feature.FUNCTIONAL, "import java.util.function.*;",

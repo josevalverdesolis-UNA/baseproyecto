@@ -273,8 +273,9 @@ public class AstTranspiler {
             // Cast Node
             case CastNode(var expr, var targetType) -> {
                 String exprCode = transpile(expr, env);
+                exprCode = parenthesizeUnaryOperand(exprCode);
                 String javaType = typeNodeToJava(targetType);
-                yield "((" + javaType + ")" + exprCode + ")";
+                yield renderCast(javaType, exprCode);
             }
 
             // Fun Node (function declaration)
@@ -391,6 +392,14 @@ public class AstTranspiler {
         String funcCode = transpile(funcNode, env);
         List<String> argList = args.stream().map(arg -> transpile(arg, env)).collect(Collectors.toList());
         String joinedArgs = String.join(", ", argList);
+        List<TypeNode> argTypes = null;
+
+        if (typer != null) {
+            argTypes = new ArrayList<>();
+            for (Node argument : args) {
+                argTypes.add(typer.apply(typer.infer(argument, env)));
+            }
+        }
 
         if (typer != null) {
             TypeNode funcType = typer.apply(typer.infer(funcNode, env));
@@ -408,7 +417,13 @@ public class AstTranspiler {
                     String contents = joinedArgs.isBlank() ? "" : joinedArgs;
                     argsCode = "new Object[]{" + contents + "}";
                 } else {
-                    argsCode = joinedArgs;
+                    List<String> adaptedArgs = new ArrayList<>();
+                    for (int i = 0; i < argList.size(); i++) {
+                        TypeNode expectedType = descriptor.parameterTypeAt(i);
+                        TypeNode actualType = (argTypes != null && i < argTypes.size()) ? argTypes.get(i) : null;
+                        adaptedArgs.add(adaptArgumentForParameter(argList.get(i), expectedType, actualType));
+                    }
+                    argsCode = String.join(", ", adaptedArgs);
                 }
 
                 String invocation = funcCode + "." + methodName + "(" + argsCode + ")";
@@ -440,6 +455,7 @@ public class AstTranspiler {
                 features.add(Feature.POW);
                 yield "pow(" + l + ", (1.0 / " + r + "))";
             }
+            case "==", "!=" -> transpileEqualityComparison(operator, left, right, env, l, r);
             default -> "(" + l + ") " + operator + " (" + r + ")";
         };
     }
@@ -568,6 +584,119 @@ public class AstTranspiler {
         return !trimmed.isEmpty() && (trimmed.charAt(0) == '-' || trimmed.charAt(0) == '+');
     }
 
+  private String parenthesizeUnaryOperand(String code) {
+        if (needsParenthesesForUnary(code)) {
+            return "(" + code + ")";
+        }
+        return code;
+    }
+
+    private String renderCast(String javaType, String exprCode) {
+        if (javaType == null || javaType.isBlank()) {
+            return exprCode;
+        }
+        if ("Double".equals(javaType)) {
+            return "Double.valueOf(" + exprCode + ")";
+        }
+        if ("Integer".equals(javaType)) {
+            return "Integer.valueOf(" + exprCode + ")";
+        }
+        return "((" + javaType + ")(" + exprCode + "))";
+    }
+
+    private String adaptArgumentForParameter(String argCode, TypeNode expectedType, TypeNode actualType) {
+        if (typer == null || expectedType == null) {
+            return argCode;
+        }
+
+        TypeNode normalizedExpected = typer.apply(expectedType);
+        TypeNode normalizedActual = actualType != null ? typer.apply(actualType) : null;
+
+        if (normalizedActual != null && normalizedActual.equals(normalizedExpected)) {
+            return argCode;
+        }
+
+        if (isFloatLike(normalizedExpected) && normalizedActual != null && isIntLike(normalizedActual)) {
+            return "((double)(" + argCode + "))";
+        }
+
+        String javaType = typeNodeToJava(normalizedExpected);
+        if ("Object".equals(javaType)) {
+            return argCode;
+        }
+
+        return "((" + javaType + ")(" + argCode + "))";
+    }
+
+    private String transpileEqualityComparison(String operator, Node left, Node right, Env env, String leftCode,
+            String rightCode) {
+        if (typer == null) {
+            return "(" + leftCode + ") " + operator + " (" + rightCode + ")";
+        }
+
+        TypeNode leftType = typer.apply(typer.infer(left, env));
+        TypeNode rightType = typer.apply(typer.infer(right, env));
+
+        if (isNumericLike(leftType) || isNumericLike(rightType)) {
+            String numericLeft = ensureEqualityNumericOperand(leftCode, leftType);
+            String numericRight = ensureEqualityNumericOperand(rightCode, rightType);
+            return "(" + numericLeft + ") " + operator + " (" + numericRight + ")";
+        }
+
+        if (!areComparableTypes(leftType, rightType)) {
+            leftCode = "((Object)(" + leftCode + "))";
+            rightCode = "((Object)(" + rightCode + "))";
+        }
+
+        return "(" + leftCode + ") " + operator + " (" + rightCode + ")";
+    }
+
+    private String ensureEqualityNumericOperand(String code, TypeNode type) {
+        if (type == null) {
+            return code;
+        }
+        if (isFloatLike(type)) {
+            return "((double)(" + code + "))";
+        }
+        if (isIntLike(type)) {
+            return "((int)(" + code + "))";
+        }
+        return code;
+    }
+
+    private boolean areComparableTypes(TypeNode left, TypeNode right) {
+        if (left == null || right == null) {
+            return true;
+        }
+        String leftJava = typeNodeToJava(left);
+        String rightJava = typeNodeToJava(right);
+        return leftJava.equals(rightJava) || "Object".equals(leftJava) || "Object".equals(rightJava);
+    }
+
+    private boolean isNumericLike(TypeNode type) {
+        return isIntLike(type) || isFloatLike(type);
+    }
+
+    private boolean isFloatLike(TypeNode type) {
+        return isAtomicType(type, "float", "double");
+    }
+
+    private boolean isIntLike(TypeNode type) {
+        return isAtomicType(type, "int", "integer");
+    }
+
+    private boolean isAtomicType(TypeNode type, String... names) {
+        if (!(type instanceof AtomicNode atomic)) {
+            return false;
+        }
+        String actualName = atomic.name().toLowerCase();
+        for (String name : names) {
+            if (actualName.equals(name.toLowerCase())) {
+                return true;
+            }
+        }
+        return false;
+    }
     // --------------------------------------------------------------
     // Auxiliary Methods
     // --------------------------------------------------------------
@@ -828,42 +957,45 @@ public class AstTranspiler {
 
         if (params.isEmpty()) {
             if (isVoidType(normalizedReturn)) {
-                return new FunctionalDescriptor("Runnable", List.of(), "run", 0, false, null);
+                return new FunctionalDescriptor("Runnable", List.of(), "run", 0, false, null, List.of());
             }
-            return new FunctionalDescriptor("Supplier", List.of(returnJava), "get", 0, false, returnJava);
+            return new FunctionalDescriptor("Supplier", List.of(returnJava), "get", 0, false, returnJava,
+                    List.of());
         }
 
         if (params.size() == 1) {
             String in = paramJava.get(0);
             if (isVoidType(normalizedReturn)) {
-                return new FunctionalDescriptor("Consumer", List.of(in), "accept", 1, false, null);
+                return new FunctionalDescriptor("Consumer", List.of(in), "accept", 1, false, null, params);
             }
             if (isBooleanType(normalizedReturn)) {
-                return new FunctionalDescriptor("Predicate", List.of(in), "test", 1, false, null);
+                return new FunctionalDescriptor("Predicate", List.of(in), "test", 1, false, null, params);
             }
             if (areSameTypes(params.get(0), normalizedReturn)) {
-                return new FunctionalDescriptor("UnaryOperator", List.of(in), "apply", 1, false, in);
+                return new FunctionalDescriptor("UnaryOperator", List.of(in), "apply", 1, false, in, params);
             }
-            return new FunctionalDescriptor("Function", List.of(in, returnJava), "apply", 1, false, returnJava);
+            return new FunctionalDescriptor("Function", List.of(in, returnJava), "apply", 1, false, returnJava,
+                    params);
         }
 
         if (params.size() == 2) {
             String in1 = paramJava.get(0);
             String in2 = paramJava.get(1);
             if (isVoidType(normalizedReturn)) {
-                return new FunctionalDescriptor("BiConsumer", List.of(in1, in2), "accept", 2, false, null);
+                return new FunctionalDescriptor("BiConsumer", List.of(in1, in2), "accept", 2, false, null, params);
             }
             if (isBooleanType(normalizedReturn)) {
-                return new FunctionalDescriptor("BiPredicate", List.of(in1, in2), "test", 2, false, null);
+                return new FunctionalDescriptor("BiPredicate", List.of(in1, in2), "test", 2, false, null, params);
             }
             if (areSameTypes(params.get(0), params.get(1)) && areSameTypes(params.get(0), normalizedReturn)) {
-                return new FunctionalDescriptor("BinaryOperator", List.of(in1), "apply", 2, false, in1);
+                return new FunctionalDescriptor("BinaryOperator", List.of(in1), "apply", 2, false, in1, params);
             }
-            return new FunctionalDescriptor("BiFunction", List.of(in1, in2, returnJava), "apply", 2, false, returnJava);
+            return new FunctionalDescriptor("BiFunction", List.of(in1, in2, returnJava), "apply", 2, false, returnJava,
+                    params);
         }
 
         return new FunctionalDescriptor("Function", List.of("Object[]", returnJava), "apply", params.size(), true,
-                returnJava);
+                returnJava, params);
     }
 
     private List<TypeNode> extractParamTypes(TypeNode inputType) {
@@ -903,12 +1035,20 @@ public class AstTranspiler {
     }
 
     private record FunctionalDescriptor(String interfaceName, List<String> typeArguments,
-            String invocationMethod, int parameterCount, boolean expectsArrayArgument, String returnType) {
+            String invocationMethod, int parameterCount, boolean expectsArrayArgument, String returnType,
+            List<TypeNode> parameterTypes) {
         String renderType() {
             if (typeArguments == null || typeArguments.isEmpty()) {
                 return interfaceName;
             }
             return interfaceName + "<" + String.join(", ", typeArguments) + ">";
+        }
+
+        TypeNode parameterTypeAt(int index) {
+            if (parameterTypes == null || index >= parameterTypes.size()) {
+                return null;
+            }
+            return parameterTypes.get(index);
         }
     }
 
